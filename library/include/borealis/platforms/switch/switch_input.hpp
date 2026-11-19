@@ -120,8 +120,12 @@ class SwitchInputManager : public InputManager
     void system_button_thread_fn(std::stop_token token);
     void processSystemButtonEvent(::Event* event, int button);
     void refreshHalfJoyConClaims();
+#ifndef __SWITCH2__
+    void configureJoyConAssignmentMode(JoyConInputMode mode);
+#endif
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
     JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
+    bool joyConInputModeInitialized = false;
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
     };

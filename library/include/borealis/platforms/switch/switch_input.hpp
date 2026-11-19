@@ -68,6 +68,8 @@ class SwitchInputManager : public InputManager
     void clearVibration(int controller);
     void setHalfJoyConMapping(HalfJoyConSide side, const HalfJoyConMapping& mapping);
     void setHalfJoyConMappingEnabled(bool enabled);
+    void setJoyConInputMode(JoyConInputMode mode);
+    JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }
@@ -118,11 +120,16 @@ class SwitchInputManager : public InputManager
     void system_button_thread_fn(std::stop_token token);
     void processSystemButtonEvent(::Event* event, int button);
     void refreshHalfJoyConClaims();
+#ifndef __SWITCH2__
+    void configureJoyConAssignmentMode(JoyConInputMode mode);
+#endif
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
+    JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
+    bool joyConInputModeInitialized = false;
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
     };
-    std::atomic<bool> halfMappingEnabled                        = false;
+    std::atomic<bool> halfMappingEnabled                        = true;
     std::array<std::atomic<u32>, GAMEPADS_MAX> halfSystemClaims = { };
     std::array<std::atomic<u64>, 3> halfSourceCandidates        = { };
     std::atomic<u32> halfAnyClaims                              = 0;
@@ -170,6 +177,7 @@ class SwitchInputManager : public InputManager
         u32 style;
     };
     HidSixAxisSensorHandle m_six_axis_sensor_handle_handheld;
+    bool m_six_axis_sensor_handheld_active = false;
     PadSixAxis m_pad_six_axis[GAMEPADS_MAX];
 
     std::vector<bool> m_hid_keyboard_state;
@@ -183,7 +191,8 @@ class SwitchInputManager : public InputManager
     void refreshPadSixAxis(int pad);
     void upToDateMouseState();
     void hidInitializeKeyboardMap();
-    void updateControllerStateInner(ControllerState* state, PadState* pad);
+    bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side);
+    void updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide side = HalfJoyConSide::NONE, int padIndex = -1);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],
         unsigned short lowFreqMotor, unsigned short highFreqMotor);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],

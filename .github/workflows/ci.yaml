@@ -244,3 +244,20 @@ jobs:
         with:
           name: borealis-linux-x86_64-${{ matrix.driver }}${{ matrix.ext }}
           path: borealis-linux-x86_64-${{ matrix.driver }}${{ matrix.ext }}.tar.gz
+
+  joycon-mapping-tests:
+    name: Joy-Con mapping regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install host compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ python3
+      - name: Fetch libnx headers
+        run: git clone --depth 1 https://github.com/switchbrew/libnx.git "$RUNNER_TEMP/libnx"
+      - name: Run Joy-Con regression tests
+        env:
+          LIBNX_INCLUDE: ${{ runner.temp }}/libnx/nx/include
+        run: python3 tests/test_half_joycon.py

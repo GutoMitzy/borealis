@@ -14,12 +14,17 @@ def main():
     cxx = shutil.which("c++") or shutil.which("g++")
     if not cxx:
         raise SystemExit("A host C++ compiler is required for half-Joy-Con tests")
-    app = ROOT.parents[1]
-    sdk = app / "build/switch2-ci/sdk-20261115b/libounce/include/switch/services/hid.h"
-    if not sdk.is_file():
-        import os
+    import os
 
-        sdk = Path(os.environ["DEVKITPRO"]) / "libounce/include/switch/services/hid.h"
+    app = ROOT.parents[1]
+    candidates = [
+        app / "build/switch2-ci/sdk-20261115b/libounce/include/switch/services/hid.h",
+        Path(os.environ.get("DEVKITPRO", "/nonexistent")) / "libounce/include/switch/services/hid.h",
+        Path(os.environ.get("LIBNX_INCLUDE", "/nonexistent")) / "switch/services/hid.h",
+    ]
+    sdk = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if sdk is None:
+        raise SystemExit("Set DEVKITPRO or LIBNX_INCLUDE to a Switch SDK include directory")
     hid = sdk.read_text()
     buttons = re.search(r"typedef enum \{[^}]+\} HidNpadButton;", hid)[0]
     core = (ROOT / "library/include/borealis/core/input.hpp").read_text()
@@ -31,6 +36,17 @@ using namespace brls;
 int main(){
     const auto left=defaultHalfJoyConMapping(HalfJoyConSide::LEFT);
     auto right=defaultHalfJoyConMapping(HalfJoyConSide::RIGHT);
+    assert(left[9]==BUTTON_LB&&left[10]==BUTTON_LT);
+    assert(right[9]==BUTTON_RB&&right[10]==BUTTON_RT);
+    assert(halfJoyConOrder(HalfJoyConSide::LEFT)==0);
+    assert(halfJoyConOrder(HalfJoyConSide::RIGHT)==1);
+    assert(halfJoyConOrder(HalfJoyConSide::NONE)==2);
+    assert(halfJoyConStickIndex(HalfJoyConSide::LEFT)==0);
+    assert(halfJoyConStickIndex(HalfJoyConSide::RIGHT)==1);
+    const auto leftAxes=halfJoyConStickAxes(HalfJoyConSide::LEFT,0.25f,0.75f);
+    const auto rightAxes=halfJoyConStickAxes(HalfJoyConSide::RIGHT,0.25f,0.75f);
+    assert(leftAxes[0]==-0.75f&&leftAxes[1]==-0.25f);
+    assert(rightAxes[0]==0.75f&&rightAxes[1]==0.25f);
     ControllerState state{};
     assert(halfJoyConSide(1)==HalfJoyConSide::NONE);
     assert(halfJoyConSide(8)==HalfJoyConSide::LEFT&&halfJoyConSide(16)==HalfJoyConSide::RIGHT);
@@ -43,9 +59,17 @@ int main(){
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_Plus,true,false);
     assert(state.buttons[BUTTON_START]&&state.buttons[BUTTON_BACK]);
     applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_L|HidNpadButton_ZL,false,false);
-    for(int i=0;i<BUTTON_NAV_UP;++i)assert(!state.buttons[i]);
+    assert(state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_R|HidNpadButton_ZR,false,false);
-    for(int i=0;i<BUTTON_NAV_UP;++i)assert(!state.buttons[i]);
+    assert(state.buttons[BUTTON_RB]&&state.buttons[BUTTON_RT]);
+    applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_LeftSL,false,false);
+    assert(state.buttons[BUTTON_LB]&&!state.buttons[BUTTON_LT]);
+    applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_LeftSR,false,false);
+    assert(!state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
+    applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_RightSL,false,false);
+    assert(state.buttons[BUTTON_RB]&&!state.buttons[BUTTON_RT]);
+    applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_RightSR,false,false);
+    assert(!state.buttons[BUTTON_RB]&&state.buttons[BUTTON_RT]);
     const int targets[]={BUTTON_X,BUTTON_A,BUTTON_B,BUTTON_Y};
     for(auto side:{HalfJoyConSide::LEFT,HalfJoyConSide::RIGHT}){
         auto profile=defaultHalfJoyConMapping(side);

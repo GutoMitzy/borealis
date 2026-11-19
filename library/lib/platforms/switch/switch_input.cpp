@@ -186,9 +186,48 @@ SwitchInputManager::~SwitchInputManager()
 
 void SwitchInputManager::clearVibration(int controller)
 {
-    Logger::debug("Vibration clear #{}", controller);
-    hidInitializeVibrationDevices(m_vibration_device_handles[controller], 2, (HidNpadIdType)controller, HidNpadStyleTag_NpadJoyDual);
-    sendRumbleInternal(m_vibration_device_handles[controller], m_vibration_values[controller], 160.0f, 320.0f, 0.0f, 0.0f);
+    if (controller < 0 || controller >= GAMEPADS_MAX)
+        return;
+
+    const u32 style = padsState[controller].style_set;
+    HidNpadStyleTag tag = HidNpadStyleTag_NpadJoyDual;
+    int handleCount = 2;
+
+    if (style & HidNpadStyleTag_NpadJoyLeft)
+    {
+        tag = HidNpadStyleTag_NpadJoyLeft;
+        handleCount = 1;
+    }
+    else if (style & HidNpadStyleTag_NpadJoyRight)
+    {
+        tag = HidNpadStyleTag_NpadJoyRight;
+        handleCount = 1;
+    }
+    else if (style & HidNpadStyleTag_NpadFullKey)
+        tag = HidNpadStyleTag_NpadFullKey;
+    else if (!(style & HidNpadStyleTag_NpadJoyDual))
+        return;
+
+    Logger::debug("Vibration clear #{} style=0x{:x} handles={}", controller, style, handleCount);
+    const Result result = hidInitializeVibrationDevices(
+        m_vibration_device_handles[controller], handleCount, (HidNpadIdType)controller, tag);
+    if (R_FAILED(result))
+    {
+        Logger::warning("Vibration initialization failed #{} style=0x{:x} rc=0x{:x}", controller, style, result);
+        return;
+    }
+
+    if (handleCount == 1)
+    {
+        HidVibrationValue value = { };
+        value.amp_low = 320.0f;
+        value.amp_high = 0.0f;
+        value.freq_low = 160.0f;
+        value.freq_high = 320.0f;
+        hidSendVibrationValues(m_vibration_device_handles[controller], &value, 1);
+    }
+    else
+        sendRumbleInternal(m_vibration_device_handles[controller], m_vibration_values[controller], 160.0f, 320.0f, 0.0f, 0.0f);
 }
 
 void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
@@ -235,6 +274,43 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
     }
 }
 
+#ifndef __SWITCH2__
+bool SwitchInputManager::splitJoyDualController(int padIndex)
+{
+    if (hosversionBefore(5, 0, 0))
+    {
+        Logger::warning("JOYCON_SPLIT: Switch firmware 5.0.0 or newer is required");
+        return false;
+    }
+
+    const HidNpadIdType sourceId = static_cast<HidNpadIdType>(padIndex);
+    bool destinationSet = false;
+    HidNpadIdType destination = sourceId;
+    const Result leftResult = hidSetNpadJoyAssignmentModeSingleWithDestination(
+        sourceId, HidNpadJoyDeviceType_Left, &destinationSet, &destination);
+
+    if (R_FAILED(leftResult) || !destinationSet || destination == sourceId
+        || static_cast<u32>(destination) >= GAMEPADS_MAX)
+    {
+        Logger::warning("JOYCON_SPLIT: left assignment failed pad={} rc=0x{:x} destinationSet={} destination={}",
+            padIndex, leftResult, destinationSet, static_cast<u32>(destination));
+        return false;
+    }
+
+    const Result rightResult = hidSetNpadJoyAssignmentModeSingle(destination, HidNpadJoyDeviceType_Right);
+    if (R_FAILED(rightResult))
+    {
+        Logger::warning("JOYCON_SPLIT: right assignment failed pad={} destination={} rc=0x{:x}",
+            padIndex, static_cast<u32>(destination), rightResult);
+        return false;
+    }
+
+    Logger::info("JOYCON_SPLIT: separated dual Joy-Con into left pad={} and right pad={}",
+        padIndex, static_cast<u32>(destination));
+    return true;
+}
+#endif
+
 short SwitchInputManager::getControllersConnectedCount()
 {
     padUpdate(&this->padStateHandheld);
@@ -243,16 +319,44 @@ short SwitchInputManager::getControllersConnectedCount()
     {
         padUpdate(&this->padsState[i]);
         if (padsState[i].style_set == 0)
+        {
+#ifndef __SWITCH2__
+            joyDualSplitAttempted[i] = false;
+#endif
             continue;
+        }
 
         if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
         {
             const u64 attrib = padGetAttributes(&padsState[i]);
-            controllers += (attrib & HidNpadAttribute_IsLeftConnected) ? 1 : 0;
-            controllers += (attrib & HidNpadAttribute_IsRightConnected) ? 1 : 0;
+            const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
+            const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
+#ifndef __SWITCH2__
+            if (leftConnected && rightConnected && !joyDualSplitAttempted[i])
+            {
+                joyDualSplitAttempted[i] = true;
+                if (splitJoyDualController(i))
+                {
+                    for (int pad = 0; pad < GAMEPADS_MAX; pad++)
+                        padUpdate(&padsState[pad]);
+                    padUpdate(&padStateHandheld);
+                    controllers = padStateHandheld.active_handheld ? 1 : 0;
+                    i = -1;
+                    continue;
+                }
+                padUpdate(&padsState[i]);
+            }
+#endif
+            controllers += leftConnected ? 1 : 0;
+            controllers += rightConnected ? 1 : 0;
         }
         else
+        {
+#ifndef __SWITCH2__
+            joyDualSplitAttempted[i] = false;
+#endif
             controllers++;
+        }
     }
     return controllers > GAMEPADS_MAX ? GAMEPADS_MAX : controllers;
 }
@@ -359,7 +463,8 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
             | HidNpadButton_StickRLeft | HidNpadButton_StickRRight | HidNpadButton_StickRUp | HidNpadButton_StickRDown);
 #endif
 
-    const bool joyDualLogical = (pad->style_set & HidNpadStyleTag_NpadJoyDual)
+    const bool joyDualLogical = (pad->style_set
+        & (HidNpadStyleTag_NpadJoyDual | HidNpadStyleTag_NpadJoyLeft | HidNpadStyleTag_NpadJoyRight))
         && logicalSide != HalfJoyConSide::NONE;
     if (joyDualLogical)
     {
@@ -571,7 +676,8 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
 
     if (side != HalfJoyConSide::NONE)
     {
-        const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
+        const int handleIndex = (pad->style_set & HidNpadStyleTag_NpadJoyDual)
+            && side == HalfJoyConSide::RIGHT ? 1 : 0;
         HidVibrationValue value = { 0 };
         value.amp_low = lowFreqMotor == 0 ? 0.0f : 320.0f;
         value.amp_high = highFreqMotor == 0 ? 0.0f : 320.0f;
@@ -600,7 +706,8 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
 
     if (side != HalfJoyConSide::NONE)
     {
-        const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
+        const int handleIndex = (pad->style_set & HidNpadStyleTag_NpadJoyDual)
+            && side == HalfJoyConSide::RIGHT ? 1 : 0;
         HidVibrationValue value = { 0 };
         value.amp_low = lowFreqMotor == 0 ? 0.0f : 320.0f;
         value.amp_high = highFreqMotor == 0 ? 0.0f : 320.0f;

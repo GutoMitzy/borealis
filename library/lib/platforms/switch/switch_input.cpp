@@ -277,6 +277,9 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
 #ifndef __SWITCH2__
 bool SwitchInputManager::splitJoyDualController(int padIndex)
 {
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
+        padUpdate(&padsState[i]);
+
     if (hosversionBefore(5, 0, 0))
     {
         Logger::warning("JOYCON_SPLIT: Switch firmware 5.0.0 or newer is required");

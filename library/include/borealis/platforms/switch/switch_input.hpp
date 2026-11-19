@@ -161,7 +161,16 @@ class SwitchInputManager : public InputManager
     bool joyConMotionLogged = false;
     bool joyConScrollLogged = false;
 #endif
-    HidSixAxisSensorHandle m_six_axis_sensor_handle[4]; // All for player 1, player 2 not supported
+    // Sixaxis: handheld has its own handle; every pad (No1..) gets handles that match its current style
+    // (FullKey / JoyDual / JoyLeft / JoyRight). Handles are re-acquired when the style of the pad changes.
+    struct PadSixAxis
+    {
+        HidSixAxisSensorHandle handles[2];
+        int count;
+        u32 style;
+    };
+    HidSixAxisSensorHandle m_six_axis_sensor_handle_handheld;
+    PadSixAxis m_pad_six_axis[GAMEPADS_MAX];
 
     std::vector<bool> m_hid_keyboard_state;
     std::unordered_map<int, BrlsKeyboardScancode> m_hid_brls_map;
@@ -171,6 +180,7 @@ class SwitchInputManager : public InputManager
     void handleMouse();
     void handleKeyboard();
     void handleControllerSensors();
+    void refreshPadSixAxis(int pad);
     void upToDateMouseState();
     void hidInitializeKeyboardMap();
     void updateControllerStateInner(ControllerState* state, PadState* pad);

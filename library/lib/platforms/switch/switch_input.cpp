@@ -142,14 +142,12 @@ SwitchInputManager::SwitchInputManager()
 
     m_hid_keyboard_state.assign(256, false);
 
-    // It's necessary to initialize these separately as they all have different handle values
-    hidGetSixAxisSensorHandles(&this->m_six_axis_sensor_handle[0], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
-    hidGetSixAxisSensorHandles(&this->m_six_axis_sensor_handle[1], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
-    hidGetSixAxisSensorHandles(&this->m_six_axis_sensor_handle[2], 2, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
-    hidStartSixAxisSensor(this->m_six_axis_sensor_handle[0]);
-    hidStartSixAxisSensor(this->m_six_axis_sensor_handle[1]);
-    hidStartSixAxisSensor(this->m_six_axis_sensor_handle[2]);
-    hidStartSixAxisSensor(this->m_six_axis_sensor_handle[3]);
+    // Handheld has its own sixaxis handle; per-pad handles are acquired lazily in refreshPadSixAxis()
+    hidGetSixAxisSensorHandles(&this->m_six_axis_sensor_handle_handheld, 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    hidStartSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
+
+    for (auto& sixAxis : this->m_pad_six_axis)
+        sixAxis = PadSixAxis{ };
 }
 
 SwitchInputManager::~SwitchInputManager()
@@ -165,10 +163,10 @@ SwitchInputManager::~SwitchInputManager()
         this->cursorTexture = 0;
     }
 
-    hidStopSixAxisSensor(this->m_six_axis_sensor_handle[0]);
-    hidStopSixAxisSensor(this->m_six_axis_sensor_handle[1]);
-    hidStopSixAxisSensor(this->m_six_axis_sensor_handle[2]);
-    hidStopSixAxisSensor(this->m_six_axis_sensor_handle[3]);
+    hidStopSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
+    for (auto& sixAxis : this->m_pad_six_axis)
+        for (int i = 0; i < sixAxis.count; i++)
+            hidStopSixAxisSensor(sixAxis.handles[i]);
 
 }
 
@@ -528,44 +526,125 @@ void SwitchInputManager::handleKeyboard()
     }
 }
 
-void SwitchInputManager::handleControllerSensors()
+// Per-side axis remap applied on top of the default conversion (after conversion to the Moonlight/DS4 frame).
+// out[k] = in[axis[k]] * sign[k]. A single Joy-Con held horizontally is rotated relative to the sensor frame the
+// default conversion assumes, and the left/right ones are mirrored, so these two tables are the place to calibrate
+// on device (watch the motion in a gamepad tester on the host). Identity = same behaviour as a full controller.
+struct SixAxisRemap
 {
-    HidSixAxisSensorState sixaxis = { 0 };
+    int axis[3];
+    float sign[3];
+};
+static const SixAxisRemap SIXAXIS_REMAP_DEFAULT       = { { 0, 1, 2 }, { 1.0f, 1.0f, 1.0f } };
+static const SixAxisRemap SIXAXIS_REMAP_JOYCON_LEFT   = { { 0, 1, 2 }, { 1.0f, 1.0f, 1.0f } };
+static const SixAxisRemap SIXAXIS_REMAP_JOYCON_RIGHT  = { { 0, 1, 2 }, { 1.0f, 1.0f, 1.0f } };
 
-    uint64_t style_set = padGetStyleSet(&padsState[0]);
-    if (padStateHandheld.active_handheld)
-        hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle[0], &sixaxis, 1);
-    else if (style_set & HidNpadStyleTag_NpadFullKey)
-        hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle[1], &sixaxis, 1);
-    else if (style_set & HidNpadStyleTag_NpadJoyDual)
+static const SixAxisRemap& sixAxisRemapFor(HalfJoyConSide side)
+{
+    switch (side)
     {
-        // For JoyDual, read from either the Left or Right Joy-Con depending on which is/are connected
-        u64 attrib = padGetAttributes(&padsState[0]);
-        if (attrib & HidNpadAttribute_IsLeftConnected)
-            hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle[2], &sixaxis, 1);
-        else if (attrib & HidNpadAttribute_IsRightConnected)
-            hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle[3], &sixaxis, 1);
+        case HalfJoyConSide::LEFT: return SIXAXIS_REMAP_JOYCON_LEFT;
+        case HalfJoyConSide::RIGHT: return SIXAXIS_REMAP_JOYCON_RIGHT;
+        default: return SIXAXIS_REMAP_DEFAULT;
+    }
+}
+
+void SwitchInputManager::refreshPadSixAxis(int pad)
+{
+    PadSixAxis& sixAxis = m_pad_six_axis[pad];
+    const u32 style     = padsState[pad].style_set;
+    if (sixAxis.style == style)
+        return;
+
+    for (int i = 0; i < sixAxis.count; i++)
+        hidStopSixAxisSensor(sixAxis.handles[i]);
+    sixAxis.count = 0;
+    sixAxis.style = style;
+
+    HidNpadStyleTag tag = HidNpadStyleTag_NpadFullKey;
+    int handleCount     = 1;
+    if (style & HidNpadStyleTag_NpadFullKey)
+        tag = HidNpadStyleTag_NpadFullKey;
+    else if (style & HidNpadStyleTag_NpadJoyDual)
+    {
+        tag         = HidNpadStyleTag_NpadJoyDual;
+        handleCount = 2; // [0] = left Joy-Con, [1] = right Joy-Con
+    }
+    else if (style & HidNpadStyleTag_NpadJoyLeft)
+        tag = HidNpadStyleTag_NpadJoyLeft;
+    else if (style & HidNpadStyleTag_NpadJoyRight)
+        tag = HidNpadStyleTag_NpadJoyRight;
+    else
+    {
+        // style == 0: pad disconnected, handles were released above and are re-acquired on reconnection
+        if (style != 0)
+            Logger::info("SIXAXIS: pad={} style=0x{:x} has no sixaxis", pad, style);
+        return;
     }
 
-    auto accelState = SensorEvent{
-        0,
-        SensorEventType::ACCEL,
-        { -sixaxis.acceleration.x,
-          -sixaxis.acceleration.z,
-          sixaxis.acceleration.y
-        },
-        0
+    hidGetSixAxisSensorHandles(sixAxis.handles, handleCount, (HidNpadIdType)pad, tag);
+    for (int i = 0; i < handleCount; i++)
+        hidStartSixAxisSensor(sixAxis.handles[i]);
+    sixAxis.count = handleCount;
+    Logger::info("SIXAXIS: pad={} style=0x{:x} handles={}", pad, style, handleCount);
+}
+
+void SwitchInputManager::handleControllerSensors()
+{
+    padUpdate(&this->padStateHandheld);
+    const bool handheld = padStateHandheld.active_handheld;
+    int controllerIndex = 0;
+
+    auto fire = [&](int index, const HidSixAxisSensorState& sixaxis, HalfJoyConSide side)
+    {
+        const float accel[3] = { -sixaxis.acceleration.x, -sixaxis.acceleration.z, sixaxis.acceleration.y };
+        const float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
+             static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
+             static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI) };
+        const SixAxisRemap& remap = sixAxisRemapFor(side);
+
+        auto accelState = SensorEvent{ index, SensorEventType::ACCEL, { 0, 0, 0 }, 0 };
+        auto gyroState  = SensorEvent{ index, SensorEventType::GYRO, { 0, 0, 0 }, 0 };
+        for (int k = 0; k < 3; k++)
+        {
+            accelState.data[k] = accel[remap.axis[k]] * remap.sign[k];
+            gyroState.data[k]  = gyro[remap.axis[k]] * remap.sign[k];
+        }
+        getControllerSensorStateChanged()->fire(accelState);
+        getControllerSensorStateChanged()->fire(gyroState);
     };
-    auto gyroState = SensorEvent{
-        0,
-        SensorEventType::GYRO,
-        { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
-          static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
-          static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI)
-        },
-        0 };
-    getControllerSensorStateChanged()->fire(accelState);
-    getControllerSensorStateChanged()->fire(gyroState);
+
+    if (handheld)
+    {
+        HidSixAxisSensorState sixaxis = { 0 };
+        hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld, &sixaxis, 1);
+        fire(controllerIndex++, sixaxis, HalfJoyConSide::NONE);
+    }
+
+    // Same indexing as getControllersConnectedCount() / updateControllerState()
+    for (int i = 0; i < GAMEPADS_MAX - (handheld ? 1 : 0); i++)
+    {
+        padUpdate(&this->padsState[i]);
+        refreshPadSixAxis(i);
+        if (padsState[i].style_set == 0)
+            break;
+
+        HidSixAxisSensorState sixaxis = { 0 };
+        const PadSixAxis& padSixAxis  = m_pad_six_axis[i];
+        if (padSixAxis.count == 2)
+        {
+            // JoyDual: read from the Left or the Right Joy-Con depending on which one is connected
+            const u64 attrib = padGetAttributes(&padsState[i]);
+            if (attrib & HidNpadAttribute_IsLeftConnected)
+                hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+            else if (attrib & HidNpadAttribute_IsRightConnected)
+                hidGetSixAxisSensorStates(padSixAxis.handles[1], &sixaxis, 1);
+        }
+        else if (padSixAxis.count == 1)
+            hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+
+        fire(controllerIndex++, sixaxis, halfJoyConSide(padsState[i].style_set));
+    }
     Application::setActiveEvent(true);
 }
 

@@ -863,8 +863,9 @@ void SwitchInputManager::handleControllerSensors()
         const PadSixAxis& padSixAxis = m_pad_six_axis[i];
         const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
         int logicalOffset = 0;
+        const int sensorCount = joyDual ? 2 : 1;
 
-        for (int sensor = 0; sensor < padSixAxis.count; sensor++)
+        for (int sensor = 0; sensor < sensorCount; sensor++)
         {
             const bool connected = !joyDual
                 || (sensor == 0 && (attrib & HidNpadAttribute_IsLeftConnected))
@@ -873,11 +874,13 @@ void SwitchInputManager::handleControllerSensors()
                 continue;
 
             const int eventController = controllerIndex + logicalOffset;
-            HidSixAxisSensorState sixaxis = { 0 };
-            const size_t samples = hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1);
             const HalfJoyConSide side = joyDual
                 ? (sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT)
                 : halfJoyConSide(padsState[i].style_set);
+            HidSixAxisSensorState sixaxis = { 0 };
+            const size_t samples = sensor < padSixAxis.count
+                ? hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1)
+                : 0;
 
             if (debugTick)
                 sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "

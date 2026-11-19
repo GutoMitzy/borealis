@@ -125,7 +125,7 @@ class SwitchInputManager : public InputManager
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
     };
-    std::atomic<bool> halfMappingEnabled                        = false;
+    std::atomic<bool> halfMappingEnabled                        = true;
     std::array<std::atomic<u32>, GAMEPADS_MAX> halfSystemClaims = { };
     std::array<std::atomic<u64>, 3> halfSourceCandidates        = { };
     std::atomic<u32> halfAnyClaims                              = 0;

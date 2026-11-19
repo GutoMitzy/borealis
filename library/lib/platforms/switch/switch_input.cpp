@@ -236,39 +236,110 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
 short SwitchInputManager::getControllersConnectedCount()
 {
     padUpdate(&this->padStateHandheld);
-    int extra       = padStateHandheld.active_handheld ? 1 : 0;
-    int controllers = extra;
-    for (int i = 0; i < GAMEPADS_MAX - extra; i++)
+    int controllers = padStateHandheld.active_handheld ? 1 : 0;
+    for (int i = 0; i < GAMEPADS_MAX && controllers < GAMEPADS_MAX; i++)
     {
         padUpdate(&this->padsState[i]);
         if (padsState[i].style_set == 0)
             break;
-        controllers++;
+
+        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+        {
+            const u64 attrib = padGetAttributes(&padsState[i]);
+            controllers += (attrib & HidNpadAttribute_IsLeftConnected) ? 1 : 0;
+            controllers += (attrib & HidNpadAttribute_IsRightConnected) ? 1 : 0;
+        }
+        else
+            controllers++;
     }
-    return controllers;
+    return std::min(controllers, GAMEPADS_MAX);
+}
+
+bool SwitchInputManager::resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
+{
+    if (controller < 0)
+        return false;
+
+    padUpdate(&this->padStateHandheld);
+    int logicalIndex = 0;
+    if (padStateHandheld.active_handheld)
+    {
+        if (controller == logicalIndex)
+        {
+            *pad = &padStateHandheld;
+            *padIndex = -1;
+            *side = HalfJoyConSide::NONE;
+            return true;
+        }
+        logicalIndex++;
+    }
+
+    for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; i++)
+    {
+        padUpdate(&padsState[i]);
+        if (padsState[i].style_set == 0)
+            break;
+
+        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+        {
+            const u64 attrib = padGetAttributes(&padsState[i]);
+            if (attrib & HidNpadAttribute_IsLeftConnected)
+            {
+                if (controller == logicalIndex)
+                {
+                    *pad = &padsState[i];
+                    *padIndex = i;
+                    *side = HalfJoyConSide::LEFT;
+                    return true;
+                }
+                logicalIndex++;
+            }
+            if (attrib & HidNpadAttribute_IsRightConnected)
+            {
+                if (controller == logicalIndex)
+                {
+                    *pad = &padsState[i];
+                    *padIndex = i;
+                    *side = HalfJoyConSide::RIGHT;
+                    return true;
+                }
+                logicalIndex++;
+            }
+        }
+        else
+        {
+            if (controller == logicalIndex)
+            {
+                *pad = &padsState[i];
+                *padIndex = i;
+                *side = halfJoyConSide(padsState[i].style_set);
+                return true;
+            }
+            logicalIndex++;
+        }
+    }
+    return false;
 }
 
 void SwitchInputManager::updateControllerState(ControllerState* state, int controller)
 {
-    padUpdate(&this->padStateHandheld);
-    if (controller == 0 && padStateHandheld.active_handheld)
-    {
-        updateControllerStateInner(state, &padStateHandheld);
+    *state = { };
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side))
         return;
-    }
 
-    int localController = padStateHandheld.active_handheld ? controller - 1 : controller;
-    PadState* pad       = &this->padsState[localController];
-    updateControllerStateInner(state, pad);
+    updateControllerStateInner(state, pad, side, padIndex);
 
-    if (padsStyleSet[localController] != pad->style_set)
+    if (padIndex >= 0 && padsStyleSet[padIndex] != pad->style_set)
     {
-        padsStyleSet[localController] = pad->style_set;
-        clearVibration(localController);
+        padsStyleSet[padIndex] = pad->style_set;
+        clearVibration(padIndex);
     }
 }
 
-void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadState* pad)
+void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide logicalSide, int padIndex)
 {
     padUpdate(pad);
     uint64_t keysDown = padGetButtons(pad);
@@ -281,6 +352,52 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
         keysDown &= ~(HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_StickR
             | HidNpadButton_StickRLeft | HidNpadButton_StickRRight | HidNpadButton_StickRUp | HidNpadButton_StickRDown);
 #endif
+
+    const bool joyDualLogical = (pad->style_set & HidNpadStyleTag_NpadJoyDual)
+        && logicalSide != HalfJoyConSide::NONE;
+    if (joyDualLogical)
+    {
+        const int sideIndex = logicalSide == HalfJoyConSide::LEFT ? 0 : 1;
+        int owner = -1;
+        for (int i = 0; i < GAMEPADS_MAX; ++i)
+            if (pad->id_mask & (1U << i))
+            {
+                owner = i;
+                break;
+            }
+
+        const int system = logicalSide == HalfJoyConSide::LEFT ? 0 : 1;
+        const bool held = system == 0 ? m_isScreenshotPressed.load() : m_isHomePressed.load();
+        const bool systemPressed = halfMappingEnabled && held && halfSystemConsumed[system]
+            && systemButtonOwners[system] == owner;
+        bool chatPressed = false;
+#ifdef __SWITCH2__
+        chatPressed = halfMappingEnabled && logicalSide == HalfJoyConSide::RIGHT && m_isChatPressed
+            && halfSystemConsumed[2] && systemButtonOwners[2] == owner;
+#endif
+        const HalfJoyConMapping mapping = halfMappingEnabled
+            ? halfMappings[sideIndex]
+            : defaultHalfJoyConMapping(logicalSide);
+        applyHalfJoyConMapping(state, mapping, logicalSide, keysDown, systemPressed, chatPressed);
+
+        HidAnalogStickState stick = padGetStickPos(pad, sideIndex);
+#ifdef __SWITCH2__
+        const auto mouseSide = this->mouse.mouseSide(pad);
+        if ((logicalSide == HalfJoyConSide::LEFT && mouseSide == PadPointerSide_Left)
+            || (logicalSide == HalfJoyConSide::RIGHT && mouseSide == PadPointerSide_Right))
+            stick = { };
+#endif
+        const float stickX = static_cast<float>(logicalSide == HalfJoyConSide::LEFT ? -stick.y : stick.y) / 32767.0f;
+        const float stickY = static_cast<float>(logicalSide == HalfJoyConSide::LEFT ? -stick.x : stick.x) / 32767.0f;
+        state->axes[LEFT_X] = stickX;
+        state->axes[LEFT_Y] = stickY;
+        state->axes[RIGHT_X] = 0;
+        state->axes[RIGHT_Y] = 0;
+        state->axes[LEFT_Z] = 0;
+        state->axes[RIGHT_Z] = 0;
+        (void)padIndex;
+        return;
+    }
 
     bool full = pad->style_set & HidNpadStyleSet_NpadFullCtrl;
 
@@ -408,28 +525,61 @@ void SwitchInputManager::sendRumbleInternal(HidVibrationDeviceHandle vibration_d
 
 void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lowFreqMotor, unsigned short highFreqMotor)
 {
-    padUpdate(&this->padStateHandheld);
-    if (controller == 0 && padStateHandheld.active_handheld)
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side))
+        return;
+
+    if (padIndex < 0)
     {
         sendRumbleInternal(m_vibration_device_handheld, m_vibration_values_handheld, lowFreqMotor, highFreqMotor);
         return;
     }
 
-    int localController = padStateHandheld.active_handheld ? controller - 1 : controller;
-    sendRumbleInternal(m_vibration_device_handles[localController], m_vibration_values[localController], lowFreqMotor, highFreqMotor);
+    if ((pad->style_set & HidNpadStyleTag_NpadJoyDual) && side != HalfJoyConSide::NONE)
+    {
+        const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
+        const unsigned short motor = side == HalfJoyConSide::LEFT ? lowFreqMotor : highFreqMotor;
+        HidVibrationValue value = { 0 };
+        value.amp_low = value.amp_high = motor == 0 ? 0.0f : 320.0f;
+        value.freq_low = value.freq_high = motor == 0 ? 160.0f : static_cast<float>(motor) / 204.0f;
+        hidSendVibrationValues(&m_vibration_device_handles[padIndex][handleIndex], &value, 1);
+        return;
+    }
+
+    sendRumbleInternal(m_vibration_device_handles[padIndex], m_vibration_values[padIndex], lowFreqMotor, highFreqMotor);
 }
 
 void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lowFreqMotor, unsigned short highFreqMotor, unsigned short leftTriggerFreqMotor, unsigned short rightTriggerFreqMotor)
 {
-    padUpdate(&this->padStateHandheld);
-    if (controller == 0 && padStateHandheld.active_handheld)
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side))
+        return;
+
+    if (padIndex < 0)
     {
         sendRumbleInternal(m_vibration_device_handheld, m_vibration_values_handheld, lowFreqMotor, highFreqMotor, leftTriggerFreqMotor, rightTriggerFreqMotor);
         return;
     }
 
-    int localController = padStateHandheld.active_handheld ? controller - 1 : controller;
-    sendRumbleInternal(m_vibration_device_handles[localController], m_vibration_values[localController], lowFreqMotor, highFreqMotor, leftTriggerFreqMotor, rightTriggerFreqMotor);
+    if ((pad->style_set & HidNpadStyleTag_NpadJoyDual) && side != HalfJoyConSide::NONE)
+    {
+        const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
+        const unsigned short motor = side == HalfJoyConSide::LEFT ? lowFreqMotor : highFreqMotor;
+        const unsigned short triggerMotor = side == HalfJoyConSide::LEFT ? leftTriggerFreqMotor : rightTriggerFreqMotor;
+        HidVibrationValue value = { 0 };
+        value.amp_low = motor == 0 ? 0.0f : 320.0f;
+        value.amp_high = triggerMotor == 0 ? 0.0f : 320.0f;
+        value.freq_low = motor == 0 ? 160.0f : static_cast<float>(motor) / 204.0f;
+        value.freq_high = triggerMotor == 0 ? 320.0f : static_cast<float>(triggerMotor) / 204.0f;
+        hidSendVibrationValues(&m_vibration_device_handles[padIndex][handleIndex], &value, 1);
+        return;
+    }
+
+    sendRumbleInternal(m_vibration_device_handles[padIndex], m_vibration_values[padIndex], lowFreqMotor, highFreqMotor, leftTriggerFreqMotor, rightTriggerFreqMotor);
 }
 
 void SwitchInputManager::updateMouseStates(RawMouseState* state)
@@ -695,45 +845,47 @@ void SwitchInputManager::handleControllerSensors()
         controllerIndex++;
     }
 
-    // Same indexing as getControllersConnectedCount() / updateControllerState()
-    for (int i = 0; i < GAMEPADS_MAX - (handheld ? 1 : 0); i++)
+    // Same logical ordering as getControllersConnectedCount() / updateControllerState().
+    for (int i = 0; i < GAMEPADS_MAX && controllerIndex < GAMEPADS_MAX; i++)
     {
         padUpdate(&this->padsState[i]);
         refreshPadSixAxis(i);
         if (padsState[i].style_set == 0)
             break;
 
-        const u64 attrib             = padGetAttributes(&padsState[i]);
+        const u64 attrib = padGetAttributes(&padsState[i]);
         const PadSixAxis& padSixAxis = m_pad_six_axis[i];
+        const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
+        int logicalOffset = 0;
 
-        // JoyDual has independent sensor handles for the left and right Joy-Con.
-        // Read every physically connected side instead of choosing only one.
         for (int sensor = 0; sensor < padSixAxis.count; sensor++)
         {
-            const bool connected = padSixAxis.count == 1
+            const bool connected = !joyDual
                 || (sensor == 0 && (attrib & HidNpadAttribute_IsLeftConnected))
                 || (sensor == 1 && (attrib & HidNpadAttribute_IsRightConnected));
             if (!connected)
                 continue;
 
+            const int eventController = controllerIndex + logicalOffset;
             HidSixAxisSensorState sixaxis = { 0 };
             const size_t samples = hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1);
-            const HalfJoyConSide side = padSixAxis.count == 2
+            const HalfJoyConSide side = joyDual
                 ? (sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT)
                 : halfJoyConSide(padsState[i].style_set);
 
             if (debugTick)
                 sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "
                              "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
-                    controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
+                    eventController, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
                     sensor, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
                     sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
                     sixaxis.acceleration.z);
 
             if (samples > 0)
-                fire(controllerIndex, sixaxis, side);
+                fire(eventController, sixaxis, side);
+            logicalOffset++;
         }
-        controllerIndex++;
+        controllerIndex += joyDual ? logicalOffset : 1;
     }
     Application::setActiveEvent(true);
 }
@@ -961,7 +1113,33 @@ bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
             return false;
         --controller;
     }
-    return halfJoyConSide(padsState[controller].style_set) != HalfJoyConSide::NONE;
+    int logicalIndex = 0;
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
+    {
+        const_cast<SwitchInputManager*>(this)->padUpdate(&padsState[i]);
+        if (padsState[i].style_set == 0)
+            break;
+        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+        {
+            const u64 attrib = padGetAttributes(&padsState[i]);
+            if (attrib & HidNpadAttribute_IsLeftConnected)
+            {
+                if (logicalIndex++ == controller)
+                    return true;
+            }
+            if (attrib & HidNpadAttribute_IsRightConnected)
+            {
+                if (logicalIndex++ == controller)
+                    return true;
+            }
+        }
+        else
+        {
+            if (logicalIndex++ == controller)
+                return halfJoyConSide(padsState[i].style_set) != HalfJoyConSide::NONE;
+        }
+    }
+    return false;
 }
 
 void SwitchInputManager::refreshHalfJoyConClaims()
@@ -982,16 +1160,31 @@ void SwitchInputManager::refreshHalfJoyConClaims()
         {
             padUpdate(&padsState[i]);
             const auto side = halfJoyConSide(padsState[i].style_set);
-            if (padsState[i].style_set)
+            if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+            {
+                const u64 attrib = padGetAttributes(&padsState[i]);
+                if (attrib & HidNpadAttribute_IsLeftConnected)
+                {
+                    candidates[0] |= 1ULL << i;
+                    claims |= halfJoyConSystemClaims(halfMappings[0], HalfJoyConSide::LEFT);
+                }
+                if (attrib & HidNpadAttribute_IsRightConnected)
+                {
+                    candidates[1] |= 1ULL << i;
+                    candidates[2] |= 1ULL << i;
+                    claims |= halfJoyConSystemClaims(halfMappings[1], HalfJoyConSide::RIGHT);
+                }
+            }
+            else if (padsState[i].style_set)
             {
                 const u32 supported = side == HalfJoyConSide::LEFT ? 1U : side == HalfJoyConSide::RIGHT ? 6U
                                                                                                         : 7U;
                 for (size_t button = 0; button < candidates.size(); ++button)
                     if (supported & (1U << button))
                         candidates[button] |= 1ULL << i;
+                if (side != HalfJoyConSide::NONE)
+                    claims = halfJoyConSystemClaims(halfMappings[side == HalfJoyConSide::LEFT ? 0 : 1], side);
             }
-            if (side != HalfJoyConSide::NONE)
-                claims = halfJoyConSystemClaims(halfMappings[side == HalfJoyConSide::LEFT ? 0 : 1], side);
         }
         if (halfSystemClaims[i].exchange(claims) != claims)
             Logger::info("HALF_JOYCON: pad={} claims=0x{:x}", i, claims);

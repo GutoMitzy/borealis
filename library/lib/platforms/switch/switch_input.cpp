@@ -34,6 +34,8 @@ using namespace std::chrono_literals;
 namespace brls
 {
 
+static uint64_t readJoyConSideButtonFallback(int padIndex, HalfJoyConSide side);
+
 static void sixAxisDebug(const char* fmt, ...);
 
 static const uint64_t HidNpadButton_None = ((uint64_t)1 << (63));

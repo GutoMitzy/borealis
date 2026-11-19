@@ -1213,7 +1213,7 @@ void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)
 
 bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
 {
-    if (controller < 0 || controller >= GAMEPADS_MAX)
+    if (!halfMappingEnabled || controller < 0 || controller >= GAMEPADS_MAX)
         return false;
 
     PadState* pad = nullptr;

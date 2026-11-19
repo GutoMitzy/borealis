@@ -1192,8 +1192,8 @@ void SwitchInputManager::handleControllerSensors()
 
     auto fire = [&](int index, const HidSixAxisSensorState& sixaxis, HalfJoyConSide side)
     {
-        const float accel[3] = { -sixaxis.acceleration.x, -sixaxis.acceleration.z, sixaxis.acceleration.y };
-        const float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
+        float accel[3] = { -sixaxis.acceleration.x, -sixaxis.acceleration.z, sixaxis.acceleration.y };
+        float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
              static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
              static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI) };
         if (side == HalfJoyConSide::LEFT || side == HalfJoyConSide::RIGHT)

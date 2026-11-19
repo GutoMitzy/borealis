@@ -126,6 +126,9 @@ class SwitchInputManager : public InputManager
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
     JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
     bool joyConInputModeInitialized = false;
+#ifndef __SWITCH2__
+    std::array<bool, GAMEPADS_MAX> joyConPairsMergedByApp = { };
+#endif
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
     };

@@ -1273,11 +1273,16 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
 
         if (mode == JoyConInputMode::SEPARATE)
         {
-            const Result firstResult = hidSetNpadJoyAssignmentModeSingleByDefault(firstId);
-            const Result secondResult = hidSetNpadJoyAssignmentModeSingleByDefault(secondId);
+            const Result firstResult = hidSetNpadJoyAssignmentModeSingle(
+                firstId, HidNpadJoyDeviceType_Left);
+            const Result secondResult = hidSetNpadJoyAssignmentModeSingle(
+                secondId, HidNpadJoyDeviceType_Right);
             if (R_FAILED(firstResult) || R_FAILED(secondResult))
-                Logger::warning("JOYCON_MODE: split assignment failed slots={}+{} rc=0x{:x}/0x{:x}",
+                Logger::warning("JOYCON_MODE: split assignment failed slots={}+{} leftRc=0x{:x} rightRc=0x{:x}",
                     first, first + 1, firstResult, secondResult);
+            else
+                Logger::info("JOYCON_MODE: left Joy-Con assigned to pad={} and right Joy-Con to pad={}",
+                    first, first + 1);
             continue;
         }
 

@@ -359,6 +359,17 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
     if (joyDualLogical)
     {
         const int sideIndex = logicalSide == HalfJoyConSide::LEFT ? 0 : 1;
+        static uint64_t lastJoyDualButtons[2] = { UINT64_MAX, UINT64_MAX };
+        if (lastJoyDualButtons[sideIndex] != keysDown)
+        {
+            lastJoyDualButtons[sideIndex] = keysDown;
+            Logger::debug("JOYCON_BUTTONS: pad={} side={} raw=0x{:016x} L={} R={} ZL={} ZR={} LeftSL={} LeftSR={} RightSL={} RightSR={}",
+                padIndex, static_cast<int>(logicalSide), keysDown,
+                (keysDown & HidNpadButton_L) != 0, (keysDown & HidNpadButton_R) != 0,
+                (keysDown & HidNpadButton_ZL) != 0, (keysDown & HidNpadButton_ZR) != 0,
+                (keysDown & HidNpadButton_LeftSL) != 0, (keysDown & HidNpadButton_LeftSR) != 0,
+                (keysDown & HidNpadButton_RightSL) != 0, (keysDown & HidNpadButton_RightSR) != 0);
+        }
         int owner = -1;
         for (int i = 0; i < GAMEPADS_MAX; ++i)
             if (pad->id_mask & (1U << i))

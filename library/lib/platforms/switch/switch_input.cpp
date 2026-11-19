@@ -18,6 +18,8 @@
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
+#include <cstdarg>
+#include <cstdio>
 #ifdef __SWITCH2__
 #include <borealis/platforms/switch/switch_touch_coordinates.hpp>
 #include <borealis/platforms/switch/switch_chat_button.hpp>
@@ -526,6 +528,34 @@ void SwitchInputManager::handleKeyboard()
     }
 }
 
+// Optional diagnostics, off by default. Create an empty file
+// sdmc:/switch/Moonlight-Switch/sixaxis_debug.enable and restart the app to get
+// sdmc:/switch/Moonlight-Switch/sixaxis_debug.log (per-controller sensor data, ~1 line/s per pad).
+static void sixAxisDebug(const char* fmt, ...)
+{
+    static int state = -1;
+    static FILE* file = nullptr;
+    static int lines = 0;
+    if (state < 0)
+    {
+        if (FILE* enable = fopen("sdmc:/switch/Moonlight-Switch/sixaxis_debug.enable", "r"))
+        {
+            fclose(enable);
+            file = fopen("sdmc:/switch/Moonlight-Switch/sixaxis_debug.log", "w");
+        }
+        state = file ? 1 : 0;
+    }
+    if (!file || lines >= 3000)
+        return;
+    lines++;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(file, fmt, args);
+    va_end(args);
+    fputc('\n', file);
+    fflush(file);
+}
+
 // Per-side axis remap applied on top of the default conversion (after conversion to the Moonlight/DS4 frame).
 // out[k] = in[axis[k]] * sign[k]. A single Joy-Con held horizontally is rotated relative to the sensor frame the
 // default conversion assumes, and the left/right ones are mirrored, so these two tables are the place to calibrate
@@ -587,6 +617,8 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
         hidStartSixAxisSensor(sixAxis.handles[i]);
     sixAxis.count = handleCount;
     Logger::info("SIXAXIS: pad={} style=0x{:x} handles={}", pad, style, handleCount);
+    sixAxisDebug("ACQUIRE pad=%d style=0x%x handles=%d h0=0x%x h1=0x%x", pad, style, handleCount,
+        sixAxis.handles[0].type_value, handleCount > 1 ? sixAxis.handles[1].type_value : 0);
 }
 
 void SwitchInputManager::handleControllerSensors()
@@ -594,6 +626,8 @@ void SwitchInputManager::handleControllerSensors()
     padUpdate(&this->padStateHandheld);
     const bool handheld = padStateHandheld.active_handheld;
     int controllerIndex = 0;
+    static unsigned debugFrame = 0;
+    const bool debugTick       = (debugFrame++ % 60) == 0;
 
     auto fire = [&](int index, const HidSixAxisSensorState& sixaxis, HalfJoyConSide side)
     {
@@ -630,18 +664,26 @@ void SwitchInputManager::handleControllerSensors()
             break;
 
         HidSixAxisSensorState sixaxis = { 0 };
+        size_t samples                = 0;
+        const u64 attrib              = padGetAttributes(&padsState[i]);
         const PadSixAxis& padSixAxis  = m_pad_six_axis[i];
         if (padSixAxis.count == 2)
         {
             // JoyDual: read from the Left or the Right Joy-Con depending on which one is connected
-            const u64 attrib = padGetAttributes(&padsState[i]);
             if (attrib & HidNpadAttribute_IsLeftConnected)
-                hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+                samples = hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
             else if (attrib & HidNpadAttribute_IsRightConnected)
-                hidGetSixAxisSensorStates(padSixAxis.handles[1], &sixaxis, 1);
+                samples = hidGetSixAxisSensorStates(padSixAxis.handles[1], &sixaxis, 1);
         }
         else if (padSixAxis.count == 1)
-            hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+            samples = hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+
+        if (debugTick)
+            sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d samples=%zu "
+                         "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
+                controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count, samples,
+                sixaxis.angular_velocity.x, sixaxis.angular_velocity.y, sixaxis.angular_velocity.z,
+                sixaxis.acceleration.x, sixaxis.acceleration.y, sixaxis.acceleration.z);
 
         fire(controllerIndex++, sixaxis, halfJoyConSide(padsState[i].style_set));
     }

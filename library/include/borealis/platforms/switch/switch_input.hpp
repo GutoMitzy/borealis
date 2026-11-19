@@ -118,6 +118,10 @@ class SwitchInputManager : public InputManager
     void system_button_thread_fn(std::stop_token token);
     void processSystemButtonEvent(::Event* event, int button);
     void refreshHalfJoyConClaims();
+#ifndef __SWITCH2__
+    bool splitJoyDualController(int padIndex);
+    std::array<bool, GAMEPADS_MAX> joyDualSplitAttempted = { };
+#endif
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)

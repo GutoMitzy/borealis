@@ -305,9 +305,7 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
             }
 
             const HalfJoyConSide physicalSide = halfJoyConSide(padsState[i].style_set);
-            const bool selected = pass == 0 ? physicalSide == HalfJoyConSide::LEFT
-                : pass == 1 ? physicalSide == HalfJoyConSide::RIGHT
-                            : physicalSide == HalfJoyConSide::NONE;
+            const bool selected = halfJoyConOrder(physicalSide) == pass;
             if (!selected)
                 continue;
 
@@ -391,16 +389,16 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
             state->buttons[BUTTON_GUIDE] |= isChatButtonPressed();
 #endif
 
-        HidAnalogStickState stick = padGetStickPos(pad, sideIndex);
+        HidAnalogStickState stick = padGetStickPos(pad, halfJoyConStickIndex(logicalSide));
 #ifdef __SWITCH2__
         if ((logicalSide == HalfJoyConSide::LEFT && mouseSide == PadPointerSide_Left)
             || (logicalSide == HalfJoyConSide::RIGHT && mouseSide == PadPointerSide_Right))
             stick = { };
 #endif
-        const float stickX = static_cast<float>(logicalSide == HalfJoyConSide::LEFT ? -stick.y : stick.y) / 32767.0f;
-        const float stickY = static_cast<float>(logicalSide == HalfJoyConSide::LEFT ? -stick.x : stick.x) / 32767.0f;
-        state->axes[LEFT_X] = stickX;
-        state->axes[LEFT_Y] = stickY;
+        const auto stickAxes = halfJoyConStickAxes(
+            logicalSide, static_cast<float>(stick.x) / 32767.0f, static_cast<float>(stick.y) / 32767.0f);
+        state->axes[LEFT_X] = stickAxes[0];
+        state->axes[LEFT_Y] = stickAxes[1];
         state->axes[RIGHT_X] = 0;
         state->axes[RIGHT_Y] = 0;
         state->axes[LEFT_Z] = 0;

@@ -379,6 +379,14 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
             ? halfMappings[sideIndex]
             : defaultHalfJoyConMapping(logicalSide);
         applyHalfJoyConMapping(state, mapping, logicalSide, keysDown, systemPressed, chatPressed);
+        if (logicalSide == HalfJoyConSide::LEFT && m_screenshotButtonMode == ButtonOverrideMode::GUIDE_BUTTON)
+            state->buttons[BUTTON_GUIDE] = isScreenshotButtonPressed();
+        if (logicalSide == HalfJoyConSide::RIGHT && m_homeButtonMode == ButtonOverrideMode::GUIDE_BUTTON)
+            state->buttons[BUTTON_GUIDE] = isHomeButtonPressed();
+#ifdef __SWITCH2__
+        if (logicalSide == HalfJoyConSide::RIGHT && m_chatButtonMode == ButtonOverrideMode::GUIDE_BUTTON)
+            state->buttons[BUTTON_GUIDE] |= isChatButtonPressed();
+#endif
 
         HidAnalogStickState stick = padGetStickPos(pad, sideIndex);
 #ifdef __SWITCH2__
@@ -1115,12 +1123,13 @@ bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
     int logicalIndex = 0;
     for (int i = 0; i < GAMEPADS_MAX; ++i)
     {
-        const_cast<SwitchInputManager*>(this)->padUpdate(&padsState[i]);
-        if (padsState[i].style_set == 0)
+        PadState* pad = const_cast<PadState*>(&padsState[i]);
+        padUpdate(pad);
+        if (pad->style_set == 0)
             break;
-        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+        if (pad->style_set & HidNpadStyleTag_NpadJoyDual)
         {
-            const u64 attrib = padGetAttributes(&padsState[i]);
+            const u64 attrib = padGetAttributes(pad);
             if (attrib & HidNpadAttribute_IsLeftConnected)
             {
                 if (logicalIndex++ == controller)
@@ -1135,7 +1144,7 @@ bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
         else
         {
             if (logicalIndex++ == controller)
-                return halfJoyConSide(padsState[i].style_set) != HalfJoyConSide::NONE;
+                return halfJoyConSide(pad->style_set) != HalfJoyConSide::NONE;
         }
     }
     return false;

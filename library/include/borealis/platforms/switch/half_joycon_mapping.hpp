@@ -11,6 +11,12 @@ enum class HalfJoyConSide
     LEFT,
     RIGHT
 };
+
+enum class JoyConInputMode
+{
+    SEPARATE,
+    PAIRED
+};
 enum class HalfJoyConButton
 {
     NORTH,
@@ -55,12 +61,12 @@ inline bool validHalfJoyConAction(int action)
 inline HalfJoyConMapping defaultHalfJoyConMapping(HalfJoyConSide side)
 {
     // Face positions are relative to the controller held horizontally.
-    return { BUTTON_X, BUTTON_A, BUTTON_B, BUTTON_Y, BUTTON_LSB, BUTTON_LB, BUTTON_RB,
+    const int shoulder = side == HalfJoyConSide::LEFT ? BUTTON_LB : BUTTON_RB;
+    const int trigger = side == HalfJoyConSide::LEFT ? BUTTON_LT : BUTTON_RT;
+    return { BUTTON_X, BUTTON_A, BUTTON_B, BUTTON_Y, BUTTON_LSB, shoulder, trigger,
         side == HalfJoyConSide::LEFT ? BUTTON_BACK : BUTTON_START,
         side == HalfJoyConSide::LEFT ? BUTTON_START : BUTTON_BACK,
-        side == HalfJoyConSide::LEFT ? BUTTON_LB : BUTTON_RB,
-        side == HalfJoyConSide::LEFT ? BUTTON_LT : BUTTON_RT,
-        HALF_JOYCON_UNMAPPED };
+        shoulder, trigger, HALF_JOYCON_UNMAPPED };
 }
 
 inline uint32_t halfJoyConSystemClaims(const HalfJoyConMapping& mapping, HalfJoyConSide side)

@@ -241,7 +241,7 @@ short SwitchInputManager::getControllersConnectedCount()
     {
         padUpdate(&this->padsState[i]);
         if (padsState[i].style_set == 0)
-            break;
+            continue;
 
         if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
         {
@@ -274,45 +274,48 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
         logicalIndex++;
     }
 
-    for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; i++)
+    for (int pass = 0; pass < 3 && logicalIndex < GAMEPADS_MAX; pass++)
     {
-        padUpdate(&padsState[i]);
-        if (padsState[i].style_set == 0)
-            break;
+        for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; i++)
+        {
+            padUpdate(&padsState[i]);
+            if (padsState[i].style_set == 0)
+                continue;
 
-        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
-        {
-            const u64 attrib = padGetAttributes(&padsState[i]);
-            if (attrib & HidNpadAttribute_IsLeftConnected)
+            const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
+            if (joyDual)
             {
+                const u64 attrib = padGetAttributes(&padsState[i]);
+                const bool connected = pass == 0
+                    ? (attrib & HidNpadAttribute_IsLeftConnected) != 0
+                    : pass == 1 && (attrib & HidNpadAttribute_IsRightConnected) != 0;
+                if (!connected)
+                    continue;
+
+                const HalfJoyConSide logicalSide = pass == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT;
                 if (controller == logicalIndex)
                 {
                     *pad = &padsState[i];
                     *padIndex = i;
-                    *side = HalfJoyConSide::LEFT;
+                    *side = logicalSide;
                     return true;
                 }
                 logicalIndex++;
+                continue;
             }
-            if (attrib & HidNpadAttribute_IsRightConnected)
-            {
-                if (controller == logicalIndex)
-                {
-                    *pad = &padsState[i];
-                    *padIndex = i;
-                    *side = HalfJoyConSide::RIGHT;
-                    return true;
-                }
-                logicalIndex++;
-            }
-        }
-        else
-        {
+
+            const HalfJoyConSide physicalSide = halfJoyConSide(padsState[i].style_set);
+            const bool selected = pass == 0 ? physicalSide == HalfJoyConSide::LEFT
+                : pass == 1 ? physicalSide == HalfJoyConSide::RIGHT
+                            : physicalSide == HalfJoyConSide::NONE;
+            if (!selected)
+                continue;
+
             if (controller == logicalIndex)
             {
                 *pad = &padsState[i];
                 *padIndex = i;
-                *side = halfJoyConSide(padsState[i].style_set);
+                *side = physicalSide;
                 return true;
             }
             logicalIndex++;
@@ -851,50 +854,35 @@ void SwitchInputManager::handleControllerSensors()
         controllerIndex++;
     }
 
-    // Same logical ordering as getControllersConnectedCount() / updateControllerState().
-    for (int i = 0; i < GAMEPADS_MAX && controllerIndex < GAMEPADS_MAX; i++)
+    const int connectedControllers = getControllersConnectedCount();
+    for (; controllerIndex < connectedControllers && controllerIndex < GAMEPADS_MAX; controllerIndex++)
     {
-        padUpdate(&this->padsState[i]);
-        refreshPadSixAxis(i);
-        if (padsState[i].style_set == 0)
-            break;
+        PadState* pad = nullptr;
+        int padIndex = -1;
+        HalfJoyConSide side = HalfJoyConSide::NONE;
+        if (!resolveController(controllerIndex, &pad, &padIndex, &side) || padIndex < 0)
+            continue;
 
-        const u64 attrib = padGetAttributes(&padsState[i]);
-        const PadSixAxis& padSixAxis = m_pad_six_axis[i];
-        const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-        int logicalOffset = 0;
-        const int sensorCount = joyDual ? 2 : 1;
+        refreshPadSixAxis(padIndex);
+        const PadSixAxis& padSixAxis = m_pad_six_axis[padIndex];
+        const bool joyDual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
+        const int sensor = joyDual && side == HalfJoyConSide::RIGHT ? 1 : 0;
+        const u64 attrib = padGetAttributes(pad);
+        HidSixAxisSensorState sixaxis = { 0 };
+        const size_t samples = sensor < padSixAxis.count
+            ? hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1)
+            : 0;
 
-        for (int sensor = 0; sensor < sensorCount; sensor++)
-        {
-            const bool connected = !joyDual
-                || (sensor == 0 && (attrib & HidNpadAttribute_IsLeftConnected))
-                || (sensor == 1 && (attrib & HidNpadAttribute_IsRightConnected));
-            if (!connected)
-                continue;
+        if (debugTick)
+            sixAxisDebug("DATA ctl=%d pad=%d style=0x%x side=%d attrib=0x%llx handles=%d selected=%d samples=%zu "
+                         "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
+                controllerIndex, padIndex, pad->style_set, static_cast<int>(side), (unsigned long long)attrib,
+                padSixAxis.count, sensor, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
+                sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
+                sixaxis.acceleration.z);
 
-            const int eventController = controllerIndex + logicalOffset;
-            const HalfJoyConSide side = joyDual
-                ? (sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT)
-                : halfJoyConSide(padsState[i].style_set);
-            HidSixAxisSensorState sixaxis = { 0 };
-            const size_t samples = sensor < padSixAxis.count
-                ? hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1)
-                : 0;
-
-            if (debugTick)
-                sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "
-                             "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
-                    eventController, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
-                    sensor, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
-                    sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
-                    sixaxis.acceleration.z);
-
-            if (samples > 0)
-                fire(eventController, sixaxis, side);
-            logicalOffset++;
-        }
-        controllerIndex += joyDual ? logicalOffset : 1;
+        if (samples > 0)
+            fire(controllerIndex, sixaxis, side);
     }
     Application::setActiveEvent(true);
 }
@@ -1116,40 +1104,12 @@ bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
 {
     if (!halfMappingEnabled || controller < 0 || controller >= GAMEPADS_MAX)
         return false;
-    if (padStateHandheld.active_handheld)
-    {
-        if (controller == 0)
-            return false;
-        --controller;
-    }
-    int logicalIndex = 0;
-    for (int i = 0; i < GAMEPADS_MAX; ++i)
-    {
-        PadState* pad = const_cast<PadState*>(&padsState[i]);
-        padUpdate(pad);
-        if (pad->style_set == 0)
-            break;
-        if (pad->style_set & HidNpadStyleTag_NpadJoyDual)
-        {
-            const u64 attrib = padGetAttributes(pad);
-            if (attrib & HidNpadAttribute_IsLeftConnected)
-            {
-                if (logicalIndex++ == controller)
-                    return true;
-            }
-            if (attrib & HidNpadAttribute_IsRightConnected)
-            {
-                if (logicalIndex++ == controller)
-                    return true;
-            }
-        }
-        else
-        {
-            if (logicalIndex++ == controller)
-                return halfJoyConSide(pad->style_set) != HalfJoyConSide::NONE;
-        }
-    }
-    return false;
+
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    return const_cast<SwitchInputManager*>(this)->resolveController(controller, &pad, &padIndex, &side)
+        && side != HalfJoyConSide::NONE;
 }
 
 void SwitchInputManager::refreshHalfJoyConClaims()

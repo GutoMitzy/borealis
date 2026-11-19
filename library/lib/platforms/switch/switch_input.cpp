@@ -703,35 +703,36 @@ void SwitchInputManager::handleControllerSensors()
         if (padsState[i].style_set == 0)
             break;
 
-        HidSixAxisSensorState sixaxis = { 0 };
-        size_t samples                = 0;
-        const u64 attrib              = padGetAttributes(&padsState[i]);
-        const PadSixAxis& padSixAxis  = m_pad_six_axis[i];
-        int selectedHandle            = -1;
-        if (padSixAxis.count == 2)
+        const u64 attrib             = padGetAttributes(&padsState[i]);
+        const PadSixAxis& padSixAxis = m_pad_six_axis[i];
+
+        // JoyDual has independent sensor handles for the left and right Joy-Con.
+        // Read every physically connected side instead of choosing only one.
+        for (int sensor = 0; sensor < padSixAxis.count; sensor++)
         {
-            // JoyDual exposes two sensor handles. Select only the physically connected side.
-            if (attrib & HidNpadAttribute_IsLeftConnected)
-                selectedHandle = 0;
-            else if (attrib & HidNpadAttribute_IsRightConnected)
-                selectedHandle = 1;
+            const bool connected = padSixAxis.count == 1
+                || (sensor == 0 && (attrib & HidNpadAttribute_IsLeftConnected))
+                || (sensor == 1 && (attrib & HidNpadAttribute_IsRightConnected));
+            if (!connected)
+                continue;
+
+            HidSixAxisSensorState sixaxis = { 0 };
+            const size_t samples = hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1);
+            const HalfJoyConSide side = padSixAxis.count == 2
+                ? (sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT)
+                : halfJoyConSide(padsState[i].style_set);
+
+            if (debugTick)
+                sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "
+                             "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
+                    controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
+                    sensor, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
+                    sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
+                    sixaxis.acceleration.z);
+
+            if (samples > 0)
+                fire(controllerIndex, sixaxis, side);
         }
-        else if (padSixAxis.count == 1)
-            selectedHandle = 0;
-
-        if (selectedHandle >= 0)
-            samples = hidGetSixAxisSensorStates(padSixAxis.handles[selectedHandle], &sixaxis, 1);
-
-        if (debugTick)
-            sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "
-                         "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
-                controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
-                selectedHandle, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
-                sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
-                sixaxis.acceleration.z);
-
-        if (samples > 0)
-            fire(controllerIndex, sixaxis, halfJoyConSide(padsState[i].style_set));
         controllerIndex++;
     }
     Application::setActiveEvent(true);

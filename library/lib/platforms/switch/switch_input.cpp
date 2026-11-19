@@ -34,6 +34,8 @@ using namespace std::chrono_literals;
 namespace brls
 {
 
+static void sixAxisDebug(const char* fmt, ...);
+
 static const uint64_t HidNpadButton_None = ((uint64_t)1 << (63));
 
 static const uint64_t SWITCH_BUTTONS_FULL_MAPPING[_BUTTON_MAX] = {
@@ -363,8 +365,8 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
         if (lastJoyDualButtons[sideIndex] != keysDown)
         {
             lastJoyDualButtons[sideIndex] = keysDown;
-            Logger::debug("JOYCON_BUTTONS: pad={} side={} raw=0x{:016x} L={} R={} ZL={} ZR={} LeftSL={} LeftSR={} RightSL={} RightSR={}",
-                padIndex, static_cast<int>(logicalSide), keysDown,
+            sixAxisDebug("JOYCON_BUTTONS: pad=%d side=%d raw=0x%016llx L=%d R=%d ZL=%d ZR=%d LeftSL=%d LeftSR=%d RightSL=%d RightSR=%d",
+                padIndex, static_cast<int>(logicalSide), static_cast<unsigned long long>(keysDown),
                 (keysDown & HidNpadButton_L) != 0, (keysDown & HidNpadButton_R) != 0,
                 (keysDown & HidNpadButton_ZL) != 0, (keysDown & HidNpadButton_ZR) != 0,
                 (keysDown & HidNpadButton_LeftSL) != 0, (keysDown & HidNpadButton_LeftSR) != 0,

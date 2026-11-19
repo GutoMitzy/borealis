@@ -115,6 +115,7 @@ static const size_t SWITCH_AXIS_MAPPING[_AXES_MAX] = {
 struct JoyConSideSample
 {
     bool available = false;
+    bool synchronized = false;
     bool connected = false;
     u64 buttons = 0;
 };
@@ -133,8 +134,10 @@ static JoyConSideSample readJoyConSideSample(
             return sample;
 
         sample.available = true;
-        sample.connected = (state.attributes & HidNpadAttribute_IsConnected) != 0;
-        if (sample.connected && state.sampling_number == dualSamplingNumber)
+        sample.synchronized = state.sampling_number == dualSamplingNumber;
+        sample.connected = sample.synchronized
+            && (state.attributes & HidNpadAttribute_IsConnected) != 0;
+        if (sample.connected)
             sample.buttons = state.buttons
                 & (HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_LeftSL | HidNpadButton_LeftSR);
         return sample;
@@ -145,8 +148,10 @@ static JoyConSideSample readJoyConSideSample(
         return sample;
 
     sample.available = true;
-    sample.connected = (state.attributes & HidNpadAttribute_IsConnected) != 0;
-    if (sample.connected && state.sampling_number == dualSamplingNumber)
+    sample.synchronized = state.sampling_number == dualSamplingNumber;
+    sample.connected = sample.synchronized
+        && (state.attributes & HidNpadAttribute_IsConnected) != 0;
+    if (sample.connected)
         sample.buttons = state.buttons
             & (HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_RightSL | HidNpadButton_RightSR);
     return sample;
@@ -164,7 +169,7 @@ static u32 joyDualConnectedSideMask(int padIndex, u64 fallbackAttributes)
     const JoyConSideSample right = readJoyConSideSample(
         padIndex, HalfJoyConSide::RIGHT, dualState.sampling_number);
 
-    if (!left.available || !right.available)
+    if (!left.available || !right.available || !left.synchronized || !right.synchronized)
         return ((fallbackAttributes & HidNpadAttribute_IsLeftConnected) ? 1U : 0U)
             | ((fallbackAttributes & HidNpadAttribute_IsRightConnected) ? 2U : 0U);
 

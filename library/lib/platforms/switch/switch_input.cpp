@@ -544,13 +544,14 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
         return;
     }
 
-    if ((pad->style_set & HidNpadStyleTag_NpadJoyDual) && side != HalfJoyConSide::NONE)
+    if (side != HalfJoyConSide::NONE)
     {
         const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
-        const unsigned short motor = side == HalfJoyConSide::LEFT ? lowFreqMotor : highFreqMotor;
         HidVibrationValue value = { 0 };
-        value.amp_low = value.amp_high = motor == 0 ? 0.0f : 320.0f;
-        value.freq_low = value.freq_high = motor == 0 ? 160.0f : static_cast<float>(motor) / 204.0f;
+        value.amp_low = lowFreqMotor == 0 ? 0.0f : 320.0f;
+        value.amp_high = highFreqMotor == 0 ? 0.0f : 320.0f;
+        value.freq_low = lowFreqMotor == 0 ? 160.0f : static_cast<float>(lowFreqMotor) / 204.0f;
+        value.freq_high = highFreqMotor == 0 ? 320.0f : static_cast<float>(highFreqMotor) / 204.0f;
         hidSendVibrationValues(&m_vibration_device_handles[padIndex][handleIndex], &value, 1);
         return;
     }
@@ -572,16 +573,14 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
         return;
     }
 
-    if ((pad->style_set & HidNpadStyleTag_NpadJoyDual) && side != HalfJoyConSide::NONE)
+    if (side != HalfJoyConSide::NONE)
     {
         const int handleIndex = side == HalfJoyConSide::LEFT ? 0 : 1;
-        const unsigned short motor = side == HalfJoyConSide::LEFT ? lowFreqMotor : highFreqMotor;
-        const unsigned short triggerMotor = side == HalfJoyConSide::LEFT ? leftTriggerFreqMotor : rightTriggerFreqMotor;
         HidVibrationValue value = { 0 };
-        value.amp_low = motor == 0 ? 0.0f : 320.0f;
-        value.amp_high = triggerMotor == 0 ? 0.0f : 320.0f;
-        value.freq_low = motor == 0 ? 160.0f : static_cast<float>(motor) / 204.0f;
-        value.freq_high = triggerMotor == 0 ? 320.0f : static_cast<float>(triggerMotor) / 204.0f;
+        value.amp_low = lowFreqMotor == 0 ? 0.0f : 320.0f;
+        value.amp_high = highFreqMotor == 0 ? 0.0f : 320.0f;
+        value.freq_low = lowFreqMotor == 0 ? 160.0f : static_cast<float>(lowFreqMotor) / 204.0f;
+        value.freq_high = highFreqMotor == 0 ? 320.0f : static_cast<float>(highFreqMotor) / 204.0f;
         hidSendVibrationValues(&m_vibration_device_handles[padIndex][handleIndex], &value, 1);
         return;
     }

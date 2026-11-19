@@ -1273,16 +1273,11 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
 
         if (mode == JoyConInputMode::SEPARATE)
         {
-            if (!joyConPairsMergedByApp[first])
-                continue;
-
             const Result firstResult = hidSetNpadJoyAssignmentModeSingleByDefault(firstId);
             const Result secondResult = hidSetNpadJoyAssignmentModeSingleByDefault(secondId);
             if (R_FAILED(firstResult) || R_FAILED(secondResult))
                 Logger::warning("JOYCON_MODE: split assignment failed slots={}+{} rc=0x{:x}/0x{:x}",
                     first, first + 1, firstResult, secondResult);
-            else
-                joyConPairsMergedByApp[first] = false;
             continue;
         }
 
@@ -1309,8 +1304,6 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
         const Result mergeResult = hidMergeSingleJoyAsDualJoy(firstId, secondId);
         if (R_FAILED(mergeResult))
             Logger::warning("JOYCON_MODE: merge failed slots={}+{} rc=0x{:x}", first, first + 1, mergeResult);
-        else
-            joyConPairsMergedByApp[first] = true;
     }
 
     for (int i = 0; i < GAMEPADS_MAX; ++i)

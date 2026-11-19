@@ -283,30 +283,49 @@ bool SwitchInputManager::splitJoyDualController(int padIndex)
         return false;
     }
 
-    const HidNpadIdType sourceId = static_cast<HidNpadIdType>(padIndex);
-    bool destinationSet = false;
-    HidNpadIdType destination = sourceId;
-    const Result leftResult = hidSetNpadJoyAssignmentModeSingleWithDestination(
-        sourceId, HidNpadJoyDeviceType_Left, &destinationSet, &destination);
-
-    if (R_FAILED(leftResult) || !destinationSet || destination == sourceId
-        || static_cast<u32>(destination) >= GAMEPADS_MAX)
+    int rightPadIndex = -1;
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
     {
-        Logger::warning("JOYCON_SPLIT: left assignment failed pad={} rc=0x{:x} destinationSet={} destination={}",
-            padIndex, leftResult, destinationSet, static_cast<u32>(destination));
+        if (i != padIndex && padsState[i].style_set == 0)
+        {
+            rightPadIndex = i;
+            break;
+        }
+    }
+
+    if (rightPadIndex < 0)
+    {
+        Logger::warning("JOYCON_SPLIT: no free Npad slot for the second Joy-Con (pad={})", padIndex);
         return false;
     }
 
-    const Result rightResult = hidSetNpadJoyAssignmentModeSingle(destination, HidNpadJoyDeviceType_Right);
+    const HidNpadIdType leftId = static_cast<HidNpadIdType>(padIndex);
+    const HidNpadIdType rightId = static_cast<HidNpadIdType>(rightPadIndex);
+    const Result leftResult = hidSetNpadJoyAssignmentModeSingle(leftId, HidNpadJoyDeviceType_Left);
+    if (R_FAILED(leftResult))
+    {
+        Logger::warning("JOYCON_SPLIT: left assignment failed pad={} rc=0x{:x}", padIndex, leftResult);
+        return false;
+    }
+
+    const Result rightResult = hidSetNpadJoyAssignmentModeSingle(rightId, HidNpadJoyDeviceType_Right);
     if (R_FAILED(rightResult))
     {
         Logger::warning("JOYCON_SPLIT: right assignment failed pad={} destination={} rc=0x{:x}",
-            padIndex, static_cast<u32>(destination), rightResult);
+            padIndex, rightPadIndex, rightResult);
+        const Result leftDualResult = hidSetNpadJoyAssignmentModeDual(leftId);
+        const Result rightDualResult = hidSetNpadJoyAssignmentModeDual(rightId);
+        if (R_SUCCEEDED(leftDualResult) && R_SUCCEEDED(rightDualResult))
+        {
+            const Result mergeResult = hidMergeSingleJoyAsDualJoy(leftId, rightId);
+            if (R_FAILED(mergeResult))
+                Logger::warning("JOYCON_SPLIT: rollback merge failed rc=0x{:x}", mergeResult);
+        }
         return false;
     }
 
     Logger::info("JOYCON_SPLIT: separated dual Joy-Con into left pad={} and right pad={}",
-        padIndex, static_cast<u32>(destination));
+        padIndex, rightPadIndex);
     return true;
 }
 #endif

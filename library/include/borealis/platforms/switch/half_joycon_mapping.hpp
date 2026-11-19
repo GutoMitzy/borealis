@@ -30,6 +30,23 @@ enum class HalfJoyConButton
 using HalfJoyConMapping            = std::array<int, static_cast<std::size_t>(HalfJoyConButton::COUNT)>;
 constexpr int HALF_JOYCON_UNMAPPED = -1;
 
+inline int halfJoyConOrder(HalfJoyConSide side)
+{
+    return side == HalfJoyConSide::LEFT ? 0 : side == HalfJoyConSide::RIGHT ? 1 : 2;
+}
+
+inline unsigned halfJoyConStickIndex(HalfJoyConSide side)
+{
+    return side == HalfJoyConSide::RIGHT ? 1U : 0U;
+}
+
+inline std::array<float, 2> halfJoyConStickAxes(HalfJoyConSide side, float x, float y)
+{
+    return side == HalfJoyConSide::LEFT
+        ? std::array<float, 2>{ -y, -x }
+        : std::array<float, 2>{ y, x };
+}
+
 inline bool validHalfJoyConAction(int action)
 {
     return action >= HALF_JOYCON_UNMAPPED && action < BUTTON_NAV_UP;

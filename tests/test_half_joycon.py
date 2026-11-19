@@ -62,6 +62,14 @@ int main(){
     assert(state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_R|HidNpadButton_ZR,false,false);
     assert(state.buttons[BUTTON_RB]&&state.buttons[BUTTON_RT]);
+    applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_LeftSL,false,false);
+    assert(state.buttons[BUTTON_LB]&&!state.buttons[BUTTON_LT]);
+    applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_LeftSR,false,false);
+    assert(!state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
+    applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_RightSL,false,false);
+    assert(state.buttons[BUTTON_RB]&&!state.buttons[BUTTON_RT]);
+    applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_RightSR,false,false);
+    assert(!state.buttons[BUTTON_RB]&&state.buttons[BUTTON_RT]);
     const int targets[]={BUTTON_X,BUTTON_A,BUTTON_B,BUTTON_Y};
     for(auto side:{HalfJoyConSide::LEFT,HalfJoyConSide::RIGHT}){
         auto profile=defaultHalfJoyConMapping(side);

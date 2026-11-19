@@ -274,112 +274,32 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
     }
 }
 
-#ifndef __SWITCH2__
-bool SwitchInputManager::splitJoyDualController(int padIndex)
-{
-    for (int i = 0; i < GAMEPADS_MAX; ++i)
-        padUpdate(&padsState[i]);
-
-    if (hosversionBefore(5, 0, 0))
-    {
-        Logger::warning("JOYCON_SPLIT: Switch firmware 5.0.0 or newer is required");
-        return false;
-    }
-
-    int rightPadIndex = -1;
-    for (int i = 0; i < GAMEPADS_MAX; ++i)
-    {
-        if (i != padIndex && padsState[i].style_set == 0)
-        {
-            rightPadIndex = i;
-            break;
-        }
-    }
-
-    if (rightPadIndex < 0)
-    {
-        Logger::warning("JOYCON_SPLIT: no free Npad slot for the second Joy-Con (pad={})", padIndex);
-        return false;
-    }
-
-    const HidNpadIdType leftId = static_cast<HidNpadIdType>(padIndex);
-    const HidNpadIdType rightId = static_cast<HidNpadIdType>(rightPadIndex);
-    const Result leftResult = hidSetNpadJoyAssignmentModeSingle(leftId, HidNpadJoyDeviceType_Left);
-    if (R_FAILED(leftResult))
-    {
-        Logger::warning("JOYCON_SPLIT: left assignment failed pad={} rc=0x{:x}", padIndex, leftResult);
-        return false;
-    }
-
-    const Result rightResult = hidSetNpadJoyAssignmentModeSingle(rightId, HidNpadJoyDeviceType_Right);
-    if (R_FAILED(rightResult))
-    {
-        Logger::warning("JOYCON_SPLIT: right assignment failed pad={} destination={} rc=0x{:x}",
-            padIndex, rightPadIndex, rightResult);
-        const Result leftDualResult = hidSetNpadJoyAssignmentModeDual(leftId);
-        const Result rightDualResult = hidSetNpadJoyAssignmentModeDual(rightId);
-        if (R_SUCCEEDED(leftDualResult) && R_SUCCEEDED(rightDualResult))
-        {
-            const Result mergeResult = hidMergeSingleJoyAsDualJoy(leftId, rightId);
-            if (R_FAILED(mergeResult))
-                Logger::warning("JOYCON_SPLIT: rollback merge failed rc=0x{:x}", mergeResult);
-        }
-        return false;
-    }
-
-    Logger::info("JOYCON_SPLIT: separated dual Joy-Con into left pad={} and right pad={}",
-        padIndex, rightPadIndex);
-    return true;
-}
-#endif
-
 short SwitchInputManager::getControllersConnectedCount()
 {
     padUpdate(&this->padStateHandheld);
     int controllers = padStateHandheld.active_handheld ? 1 : 0;
+
     for (int i = 0; i < GAMEPADS_MAX && controllers < GAMEPADS_MAX; i++)
     {
         padUpdate(&this->padsState[i]);
         if (padsState[i].style_set == 0)
-        {
-#ifndef __SWITCH2__
-            joyDualSplitAttempted[i] = false;
-#endif
             continue;
-        }
 
         if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
         {
             const u64 attrib = padGetAttributes(&padsState[i]);
             const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
             const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
-#ifndef __SWITCH2__
-            if (leftConnected && rightConnected && !joyDualSplitAttempted[i])
-            {
-                joyDualSplitAttempted[i] = true;
-                if (splitJoyDualController(i))
-                {
-                    for (int pad = 0; pad < GAMEPADS_MAX; pad++)
-                        padUpdate(&padsState[pad]);
-                    padUpdate(&padStateHandheld);
-                    controllers = padStateHandheld.active_handheld ? 1 : 0;
-                    i = -1;
-                    continue;
-                }
-                padUpdate(&padsState[i]);
-            }
-#endif
-            controllers += leftConnected ? 1 : 0;
-            controllers += rightConnected ? 1 : 0;
+
+            if (joyConInputMode == JoyConInputMode::PAIRED && leftConnected && rightConnected)
+                controllers++;
+            else
+                controllers += (leftConnected ? 1 : 0) + (rightConnected ? 1 : 0);
         }
         else
-        {
-#ifndef __SWITCH2__
-            joyDualSplitAttempted[i] = false;
-#endif
             controllers++;
-        }
     }
+
     return controllers > GAMEPADS_MAX ? GAMEPADS_MAX : controllers;
 }
 
@@ -414,9 +334,28 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
             if (joyDual)
             {
                 const u64 attrib = padGetAttributes(&padsState[i]);
-                const bool connected = pass == 0
-                    ? (attrib & HidNpadAttribute_IsLeftConnected) != 0
-                    : pass == 1 && (attrib & HidNpadAttribute_IsRightConnected) != 0;
+                const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
+                const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
+                const bool paired = joyConInputMode == JoyConInputMode::PAIRED
+                    && leftConnected && rightConnected;
+
+                if (paired)
+                {
+                    if (pass != 2)
+                        continue;
+
+                    if (controller == logicalIndex)
+                    {
+                        *pad = &padsState[i];
+                        *padIndex = i;
+                        *side = HalfJoyConSide::NONE;
+                        return true;
+                    }
+                    logicalIndex++;
+                    continue;
+                }
+
+                const bool connected = pass == 0 ? leftConnected : pass == 1 && rightConnected;
                 if (!connected)
                     continue;
 
@@ -1017,7 +956,7 @@ void SwitchInputManager::handleControllerSensors()
         refreshPadSixAxis(padIndex);
         const PadSixAxis& padSixAxis = m_pad_six_axis[padIndex];
         const bool joyDual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-        const int sensor = joyDual && side == HalfJoyConSide::RIGHT ? 1 : 0;
+        const int sensor = joyDual && side == HalfJoyConSide::LEFT ? 0 : (joyDual ? 1 : 0);
         const u64 attrib = padGetAttributes(pad);
         HidSixAxisSensorState sixaxis = { 0 };
         const size_t samples = sensor < padSixAxis.count
@@ -1234,6 +1173,27 @@ void SwitchInputManager::setHalfJoyConMapping(HalfJoyConSide side, const HalfJoy
     refreshHalfJoyConClaims();
 }
 
+void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
+{
+    if (joyConInputMode == mode)
+        return;
+
+    joyConInputMode = mode;
+    const HidNpadJoyHoldType holdType = mode == JoyConInputMode::PAIRED
+        ? HidNpadJoyHoldType_Vertical
+        : HidNpadJoyHoldType_Horizontal;
+    const Result result = hidSetNpadJoyHoldType(holdType);
+
+    if (R_FAILED(result))
+        Logger::warning("JOYCON_MODE: hold type update failed mode={} rc=0x{:x}",
+            static_cast<int>(mode), result);
+    else
+        Logger::info("JOYCON_MODE: mode={} holdType={}",
+            static_cast<int>(mode), static_cast<int>(holdType));
+
+    refreshHalfJoyConClaims();
+}
+
 void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)
 {
     halfMappingEnabled = enabled;
@@ -1253,7 +1213,7 @@ void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)
 
 bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
 {
-    if (!halfMappingEnabled || controller < 0 || controller >= GAMEPADS_MAX)
+    if (controller < 0 || controller >= GAMEPADS_MAX)
         return false;
 
     PadState* pad = nullptr;
@@ -1284,16 +1244,19 @@ void SwitchInputManager::refreshHalfJoyConClaims()
             if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
             {
                 const u64 attrib = padGetAttributes(&padsState[i]);
-                if (attrib & HidNpadAttribute_IsLeftConnected)
+                if (joyConInputMode == JoyConInputMode::SEPARATE)
                 {
-                    candidates[0] |= 1ULL << i;
-                    claims |= halfJoyConSystemClaims(halfMappings[0], HalfJoyConSide::LEFT);
-                }
-                if (attrib & HidNpadAttribute_IsRightConnected)
-                {
-                    candidates[1] |= 1ULL << i;
-                    candidates[2] |= 1ULL << i;
-                    claims |= halfJoyConSystemClaims(halfMappings[1], HalfJoyConSide::RIGHT);
+                    if (attrib & HidNpadAttribute_IsLeftConnected)
+                    {
+                        candidates[0] |= 1ULL << i;
+                        claims |= halfJoyConSystemClaims(halfMappings[0], HalfJoyConSide::LEFT);
+                    }
+                    if (attrib & HidNpadAttribute_IsRightConnected)
+                    {
+                        candidates[1] |= 1ULL << i;
+                        candidates[2] |= 1ULL << i;
+                        claims |= halfJoyConSystemClaims(halfMappings[1], HalfJoyConSide::RIGHT);
+                    }
                 }
             }
             else if (padsState[i].style_set)

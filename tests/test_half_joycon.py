@@ -33,6 +33,15 @@ int main(){
     auto right=defaultHalfJoyConMapping(HalfJoyConSide::RIGHT);
     assert(left[9]==BUTTON_LB&&left[10]==BUTTON_LT);
     assert(right[9]==BUTTON_RB&&right[10]==BUTTON_RT);
+    assert(halfJoyConOrder(HalfJoyConSide::LEFT)==0);
+    assert(halfJoyConOrder(HalfJoyConSide::RIGHT)==1);
+    assert(halfJoyConOrder(HalfJoyConSide::NONE)==2);
+    assert(halfJoyConStickIndex(HalfJoyConSide::LEFT)==0);
+    assert(halfJoyConStickIndex(HalfJoyConSide::RIGHT)==1);
+    const auto leftAxes=halfJoyConStickAxes(HalfJoyConSide::LEFT,0.25f,0.75f);
+    const auto rightAxes=halfJoyConStickAxes(HalfJoyConSide::RIGHT,0.25f,0.75f);
+    assert(leftAxes[0]==-0.75f&&leftAxes[1]==-0.25f);
+    assert(rightAxes[0]==0.75f&&rightAxes[1]==0.25f);
     ControllerState state{};
     assert(halfJoyConSide(1)==HalfJoyConSide::NONE);
     assert(halfJoyConSide(8)==HalfJoyConSide::LEFT&&halfJoyConSide(16)==HalfJoyConSide::RIGHT);

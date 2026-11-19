@@ -424,6 +424,14 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
             | HidNpadButton_StickRLeft | HidNpadButton_StickRRight | HidNpadButton_StickRUp | HidNpadButton_StickRDown);
 #endif
 
+    if (padIndex >= 0 && (pad->style_set & HidNpadStyleTag_NpadJoyDual))
+    {
+        if (logicalSide == HalfJoyConSide::LEFT || logicalSide == HalfJoyConSide::NONE)
+            keysDown |= readJoyConSideButtonFallback(padIndex, HalfJoyConSide::LEFT);
+        if (logicalSide == HalfJoyConSide::RIGHT || logicalSide == HalfJoyConSide::NONE)
+            keysDown |= readJoyConSideButtonFallback(padIndex, HalfJoyConSide::RIGHT);
+    }
+
     const bool joyDualLogical = (pad->style_set
         & (HidNpadStyleTag_NpadJoyDual | HidNpadStyleTag_NpadJoyLeft | HidNpadStyleTag_NpadJoyRight))
         && logicalSide != HalfJoyConSide::NONE;
@@ -813,6 +821,37 @@ static void sixAxisDebug(const char* fmt, ...)
     va_end(args);
     fputc('\n', file);
     fflush(file);
+}
+
+static uint64_t readJoyConSideButtonFallback(int padIndex, HalfJoyConSide side)
+{
+    if (padIndex < 0 || padIndex >= GAMEPADS_MAX || side == HalfJoyConSide::NONE)
+        return 0;
+
+    HidNpadJoyDualState dualState = { };
+    if (hidGetNpadStatesJoyDual(static_cast<HidNpadIdType>(padIndex), &dualState, 1) == 0)
+        return 0;
+
+    if (side == HalfJoyConSide::LEFT)
+    {
+        HidNpadJoyLeftState leftState = { };
+        if (hidGetNpadStatesJoyLeft(static_cast<HidNpadIdType>(padIndex), &leftState, 1) == 0
+            || !(leftState.attributes & HidNpadAttribute_IsConnected)
+            || leftState.sampling_number != dualState.sampling_number)
+            return 0;
+
+        return leftState.buttons
+            & (HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_LeftSL | HidNpadButton_LeftSR);
+    }
+
+    HidNpadJoyRightState rightState = { };
+    if (hidGetNpadStatesJoyRight(static_cast<HidNpadIdType>(padIndex), &rightState, 1) == 0
+        || !(rightState.attributes & HidNpadAttribute_IsConnected)
+        || rightState.sampling_number != dualState.sampling_number)
+        return 0;
+
+    return rightState.buttons
+        & (HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_RightSL | HidNpadButton_RightSR);
 }
 
 // Per-side axis remap applied on top of the default conversion (after conversion to the Moonlight/DS4 frame).

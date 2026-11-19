@@ -70,6 +70,8 @@ class SwitchInputManager : public InputManager
     void setHalfJoyConMappingEnabled(bool enabled);
     void setJoyConInputMode(JoyConInputMode mode);
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
+    void setJoyConPairGyroMode(JoyConPairGyroMode mode);
+    JoyConPairGyroMode getJoyConPairGyroMode() const { return joyConPairGyroMode; }
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }
@@ -125,6 +127,7 @@ class SwitchInputManager : public InputManager
 #endif
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
     JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
+    JoyConPairGyroMode joyConPairGyroMode = JoyConPairGyroMode::RIGHT;
     bool joyConInputModeInitialized = false;
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
@@ -191,7 +194,8 @@ class SwitchInputManager : public InputManager
     void refreshPadSixAxis(int pad);
     void upToDateMouseState();
     void hidInitializeKeyboardMap();
-    bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side);
+    // gyroOnly (optional) is set for the extra gyro-only controller of JoyConPairGyroMode::BOTH
+    bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side, bool* gyroOnly = nullptr);
     void updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide side = HalfJoyConSide::NONE, int padIndex = -1);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],
         unsigned short lowFreqMotor, unsigned short highFreqMotor);

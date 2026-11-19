@@ -17,6 +17,16 @@ enum class JoyConInputMode
     SEPARATE,
     PAIRED
 };
+
+// Which Joy-Con feeds the gyro when two Joy-Cons are used as one controller (JoyConInputMode::PAIRED).
+// A virtual gamepad only carries one gyro, so BOTH adds a second, gyro-only controller that carries
+// the gyro of the other Joy-Con (all of its buttons and sticks stay neutral).
+enum class JoyConPairGyroMode
+{
+    RIGHT,
+    LEFT,
+    BOTH
+};
 enum class HalfJoyConButton
 {
     NORTH,

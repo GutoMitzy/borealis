@@ -361,7 +361,7 @@ short SwitchInputManager::getControllersConnectedCount()
             const bool rightConnected = (connectedSides & 2U) != 0;
 
             if (joyConInputMode == JoyConInputMode::PAIRED && leftConnected && rightConnected)
-                controllers++;
+                controllers += joyConPairGyroMode == JoyConPairGyroMode::BOTH ? 2 : 1;
             else
                 controllers += (leftConnected ? 1 : 0) + (rightConnected ? 1 : 0);
         }
@@ -372,8 +372,10 @@ short SwitchInputManager::getControllersConnectedCount()
     return controllers > GAMEPADS_MAX ? GAMEPADS_MAX : controllers;
 }
 
-bool SwitchInputManager::resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
+bool SwitchInputManager::resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side, bool* gyroOnly)
 {
+    if (gyroOnly)
+        *gyroOnly = false;
     if (controller < 0)
         return false;
 
@@ -422,6 +424,21 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
                         return true;
                     }
                     logicalIndex++;
+
+                    if (joyConPairGyroMode == JoyConPairGyroMode::BOTH && logicalIndex < GAMEPADS_MAX)
+                    {
+                        // Gyro-only companion of the pair: same pad, neutral buttons, gyro of the other Joy-Con
+                        if (controller == logicalIndex)
+                        {
+                            *pad = &padsState[i];
+                            *padIndex = i;
+                            *side = HalfJoyConSide::NONE;
+                            if (gyroOnly)
+                                *gyroOnly = true;
+                            return true;
+                        }
+                        logicalIndex++;
+                    }
                     continue;
                 }
 
@@ -465,8 +482,12 @@ void SwitchInputManager::updateControllerState(ControllerState* state, int contr
     PadState* pad = nullptr;
     int padIndex = -1;
     HalfJoyConSide side = HalfJoyConSide::NONE;
-    if (!resolveController(controller, &pad, &padIndex, &side))
+    bool gyroOnly = false;
+    if (!resolveController(controller, &pad, &padIndex, &side, &gyroOnly))
         return;
+
+    if (gyroOnly)
+        return; // gyro-only companion: no buttons, no sticks
 
     updateControllerStateInner(state, pad, side, padIndex);
 
@@ -704,7 +725,8 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
     PadState* pad = nullptr;
     int padIndex = -1;
     HalfJoyConSide side = HalfJoyConSide::NONE;
-    if (!resolveController(controller, &pad, &padIndex, &side))
+    bool gyroOnly = false;
+    if (!resolveController(controller, &pad, &padIndex, &side, &gyroOnly) || gyroOnly)
         return;
 
     if (padIndex < 0)
@@ -734,7 +756,8 @@ void SwitchInputManager::sendRumble(unsigned short controller, unsigned short lo
     PadState* pad = nullptr;
     int padIndex = -1;
     HalfJoyConSide side = HalfJoyConSide::NONE;
-    if (!resolveController(controller, &pad, &padIndex, &side))
+    bool gyroOnly = false;
+    if (!resolveController(controller, &pad, &padIndex, &side, &gyroOnly) || gyroOnly)
         return;
 
     if (padIndex < 0)
@@ -1042,13 +1065,26 @@ void SwitchInputManager::handleControllerSensors()
         PadState* pad = nullptr;
         int padIndex = -1;
         HalfJoyConSide side = HalfJoyConSide::NONE;
-        if (!resolveController(controllerIndex, &pad, &padIndex, &side) || padIndex < 0)
+        bool gyroOnly = false;
+        if (!resolveController(controllerIndex, &pad, &padIndex, &side, &gyroOnly) || padIndex < 0)
             continue;
 
         refreshPadSixAxis(padIndex);
         const PadSixAxis& padSixAxis = m_pad_six_axis[padIndex];
         const bool joyDual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-        const int sensor = joyDual && side == HalfJoyConSide::LEFT ? 0 : (joyDual ? 1 : 0);
+        // JoyDual handles: [0] = left Joy-Con, [1] = right Joy-Con
+        int sensor = 0;
+        if (joyDual)
+        {
+            if (side == HalfJoyConSide::LEFT)
+                sensor = 0;
+            else if (side == HalfJoyConSide::RIGHT)
+                sensor = 1;
+            else if (gyroOnly)
+                sensor = 0; // companion carries the left Joy-Con (the main controller carries the right one)
+            else
+                sensor = joyConPairGyroMode == JoyConPairGyroMode::LEFT ? 0 : 1;
+        }
         const u64 attrib = padGetAttributes(pad);
         HidSixAxisSensorState sixaxis = { 0 };
         const size_t samples = sensor < padSixAxis.count
@@ -1340,6 +1376,15 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
     Logger::info("JOYCON_MODE: mode={} holdType={}",
         static_cast<int>(mode), static_cast<int>(holdType));
     refreshHalfJoyConClaims();
+}
+
+void SwitchInputManager::setJoyConPairGyroMode(JoyConPairGyroMode mode)
+{
+    if (joyConPairGyroMode == mode)
+        return;
+
+    joyConPairGyroMode = mode;
+    Logger::info("JOYCON_MODE: pair gyro mode={}", static_cast<int>(mode));
 }
 
 void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)

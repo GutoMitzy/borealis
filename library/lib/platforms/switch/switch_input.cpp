@@ -1046,7 +1046,7 @@ void SwitchInputManager::handleControllerSensors()
         refreshPadSixAxis(padIndex);
         const PadSixAxis& padSixAxis = m_pad_six_axis[padIndex];
         const bool joyDual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-        const int sensor = joyDual && side == HalfJoyConSide::RIGHT ? 1 : 0;
+        const int sensor = joyDual && side == HalfJoyConSide::LEFT ? 0 : (joyDual ? 1 : 0);
         const u64 attrib = padGetAttributes(pad);
         HidSixAxisSensorState sixaxis = { 0 };
         const size_t samples = sensor < padSixAxis.count

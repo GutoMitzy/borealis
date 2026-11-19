@@ -112,6 +112,65 @@ static const size_t SWITCH_AXIS_MAPPING[_AXES_MAX] = {
     RIGHT_Y,
 };
 
+struct JoyConSideSample
+{
+    bool available = false;
+    bool connected = false;
+    u64 buttons = 0;
+};
+
+static JoyConSideSample readJoyConSideSample(
+    int padIndex, HalfJoyConSide side, u64 dualSamplingNumber)
+{
+    JoyConSideSample sample;
+    if (padIndex < 0 || padIndex >= GAMEPADS_MAX || side == HalfJoyConSide::NONE)
+        return sample;
+
+    if (side == HalfJoyConSide::LEFT)
+    {
+        HidNpadJoyLeftState state = { };
+        if (hidGetNpadStatesJoyLeft(static_cast<HidNpadIdType>(padIndex), &state, 1) == 0)
+            return sample;
+
+        sample.available = true;
+        sample.connected = (state.attributes & HidNpadAttribute_IsConnected) != 0;
+        if (sample.connected && state.sampling_number == dualSamplingNumber)
+            sample.buttons = state.buttons
+                & (HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_LeftSL | HidNpadButton_LeftSR);
+        return sample;
+    }
+
+    HidNpadJoyRightState state = { };
+    if (hidGetNpadStatesJoyRight(static_cast<HidNpadIdType>(padIndex), &state, 1) == 0)
+        return sample;
+
+    sample.available = true;
+    sample.connected = (state.attributes & HidNpadAttribute_IsConnected) != 0;
+    if (sample.connected && state.sampling_number == dualSamplingNumber)
+        sample.buttons = state.buttons
+            & (HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_RightSL | HidNpadButton_RightSR);
+    return sample;
+}
+
+static u32 joyDualConnectedSideMask(int padIndex, u64 fallbackAttributes)
+{
+    HidNpadJoyDualState dualState = { };
+    if (hidGetNpadStatesJoyDual(static_cast<HidNpadIdType>(padIndex), &dualState, 1) == 0)
+        return ((fallbackAttributes & HidNpadAttribute_IsLeftConnected) ? 1U : 0U)
+            | ((fallbackAttributes & HidNpadAttribute_IsRightConnected) ? 2U : 0U);
+
+    const JoyConSideSample left = readJoyConSideSample(
+        padIndex, HalfJoyConSide::LEFT, dualState.sampling_number);
+    const JoyConSideSample right = readJoyConSideSample(
+        padIndex, HalfJoyConSide::RIGHT, dualState.sampling_number);
+
+    if (!left.available || !right.available)
+        return ((fallbackAttributes & HidNpadAttribute_IsLeftConnected) ? 1U : 0U)
+            | ((fallbackAttributes & HidNpadAttribute_IsRightConnected) ? 2U : 0U);
+
+    return (left.connected ? 1U : 0U) | (right.connected ? 2U : 0U);
+}
+
 SwitchInputManager::SwitchInputManager()
 {
     this->system_button_thread = std::jthread(&SwitchInputManager::system_button_thread_fn, this);
@@ -290,10 +349,14 @@ short SwitchInputManager::getControllersConnectedCount()
         if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
         {
             const u64 attrib = padGetAttributes(&padsState[i]);
-            const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
-            const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
-            if (leftConnected || rightConnected)
+            const u32 connectedSides = joyDualConnectedSideMask(i, attrib);
+            const bool leftConnected = (connectedSides & 1U) != 0;
+            const bool rightConnected = (connectedSides & 2U) != 0;
+
+            if (joyConInputMode == JoyConInputMode::PAIRED && leftConnected && rightConnected)
                 controllers++;
+            else
+                controllers += (leftConnected ? 1 : 0) + (rightConnected ? 1 : 0);
         }
         else
             controllers++;
@@ -333,9 +396,11 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
             if (joyDual)
             {
                 const u64 attrib = padGetAttributes(&padsState[i]);
-                const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
-                const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
-                const bool paired = leftConnected && rightConnected;
+                const u32 connectedSides = joyDualConnectedSideMask(i, attrib);
+                const bool leftConnected = (connectedSides & 1U) != 0;
+                const bool rightConnected = (connectedSides & 2U) != 0;
+                const bool paired = joyConInputMode == JoyConInputMode::PAIRED
+                    && leftConnected && rightConnected;
 
                 if (paired)
                 {
@@ -830,26 +895,9 @@ static uint64_t readJoyConSideButtonFallback(int padIndex, HalfJoyConSide side)
     if (hidGetNpadStatesJoyDual(static_cast<HidNpadIdType>(padIndex), &dualState, 1) == 0)
         return 0;
 
-    if (side == HalfJoyConSide::LEFT)
-    {
-        HidNpadJoyLeftState leftState = { };
-        if (hidGetNpadStatesJoyLeft(static_cast<HidNpadIdType>(padIndex), &leftState, 1) == 0
-            || !(leftState.attributes & HidNpadAttribute_IsConnected)
-            || leftState.sampling_number != dualState.sampling_number)
-            return 0;
-
-        return leftState.buttons
-            & (HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_LeftSL | HidNpadButton_LeftSR);
-    }
-
-    HidNpadJoyRightState rightState = { };
-    if (hidGetNpadStatesJoyRight(static_cast<HidNpadIdType>(padIndex), &rightState, 1) == 0
-        || !(rightState.attributes & HidNpadAttribute_IsConnected)
-        || rightState.sampling_number != dualState.sampling_number)
-        return 0;
-
-    return rightState.buttons
-        & (HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_RightSL | HidNpadButton_RightSR);
+    const JoyConSideSample sample = readJoyConSideSample(
+        padIndex, side, dualState.sampling_number);
+    return sample.connected ? sample.buttons : 0;
 }
 
 // Per-side axis remap applied on top of the default conversion (after conversion to the Moonlight/DS4 frame).
@@ -1220,11 +1268,16 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
 
         if (mode == JoyConInputMode::SEPARATE)
         {
+            if (!joyConPairsMergedByApp[first])
+                continue;
+
             const Result firstResult = hidSetNpadJoyAssignmentModeSingleByDefault(firstId);
             const Result secondResult = hidSetNpadJoyAssignmentModeSingleByDefault(secondId);
             if (R_FAILED(firstResult) || R_FAILED(secondResult))
                 Logger::warning("JOYCON_MODE: split assignment failed slots={}+{} rc=0x{:x}/0x{:x}",
                     first, first + 1, firstResult, secondResult);
+            else
+                joyConPairsMergedByApp[first] = false;
             continue;
         }
 
@@ -1232,11 +1285,11 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
         padUpdate(&padsState[first + 1]);
         const u32 firstStyle = padsState[first].style_set;
         const u32 secondStyle = padsState[first + 1].style_set;
-        const u32 halfStyles = HidNpadStyleTag_NpadJoyLeft | HidNpadStyleTag_NpadJoyRight;
-        const bool firstIsHalf = (firstStyle & halfStyles) != 0;
-        const bool secondIsHalf = (secondStyle & halfStyles) != 0;
+        const bool complementaryHalves =
+            ((firstStyle & HidNpadStyleTag_NpadJoyLeft) && (secondStyle & HidNpadStyleTag_NpadJoyRight))
+            || ((firstStyle & HidNpadStyleTag_NpadJoyRight) && (secondStyle & HidNpadStyleTag_NpadJoyLeft));
 
-        if (!firstIsHalf || !secondIsHalf)
+        if (!complementaryHalves)
             continue;
 
         const Result firstDualResult = hidSetNpadJoyAssignmentModeDual(firstId);
@@ -1251,6 +1304,8 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
         const Result mergeResult = hidMergeSingleJoyAsDualJoy(firstId, secondId);
         if (R_FAILED(mergeResult))
             Logger::warning("JOYCON_MODE: merge failed slots={}+{} rc=0x{:x}", first, first + 1, mergeResult);
+        else
+            joyConPairsMergedByApp[first] = true;
     }
 
     for (int i = 0; i < GAMEPADS_MAX; ++i)
@@ -1332,15 +1387,16 @@ void SwitchInputManager::refreshHalfJoyConClaims()
             if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
             {
                 const u64 attrib = padGetAttributes(&padsState[i]);
-                const bool leftConnected = (attrib & HidNpadAttribute_IsLeftConnected) != 0;
-                const bool rightConnected = (attrib & HidNpadAttribute_IsRightConnected) != 0;
+                const u32 connectedSides = joyDualConnectedSideMask(i, attrib);
+                const bool leftConnected = (connectedSides & 1U) != 0;
+                const bool rightConnected = (connectedSides & 2U) != 0;
 
-                if (leftConnected && !rightConnected)
+                if (leftConnected && (!rightConnected || joyConInputMode == JoyConInputMode::SEPARATE))
                 {
                     candidates[0] |= 1ULL << i;
                     claims |= halfJoyConSystemClaims(halfMappings[0], HalfJoyConSide::LEFT);
                 }
-                else if (rightConnected && !leftConnected)
+                if (rightConnected && (!leftConnected || joyConInputMode == JoyConInputMode::SEPARATE))
                 {
                     candidates[1] |= 1ULL << i;
                     candidates[2] |= 1ULL << i;

@@ -15,6 +15,8 @@
 */
 
 #include <chrono>
+#include <cmath>
+#include <thread>
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
@@ -953,6 +955,167 @@ static const SixAxisRemap& sixAxisRemapFor(HalfJoyConSide side)
     }
 }
 
+
+SwitchInputManager::MotionCalibration SwitchInputManager::getMotionCalibration(HalfJoyConSide side) const
+{
+    if (side == HalfJoyConSide::LEFT)
+        return m_motionCalibration[0];
+    if (side == HalfJoyConSide::RIGHT)
+        return m_motionCalibration[1];
+    return {};
+}
+
+void SwitchInputManager::setMotionCalibration(HalfJoyConSide side, const MotionCalibration& calibration)
+{
+    if (side != HalfJoyConSide::LEFT && side != HalfJoyConSide::RIGHT)
+        return;
+    MotionCalibration safe = calibration;
+    float norm2 = 0.0f;
+    for (int k = 0; k < 3; k++)
+    {
+        if (!std::isfinite(safe.gyroBias[k]) || !std::isfinite(safe.gravityReference[k])
+            || std::abs(safe.gyroBias[k]) > 5.0f || std::abs(safe.gravityReference[k]) > 100.0f)
+            safe.valid = false;
+        norm2 += safe.gravityReference[k] * safe.gravityReference[k];
+    }
+    if (norm2 < 0.01f || norm2 > 20000.0f)
+        safe.valid = false;
+    m_motionCalibration[side == HalfJoyConSide::LEFT ? 0 : 1] = safe;
+}
+
+bool SwitchInputManager::calibrateJoyConsOnFlatSurface()
+{
+    struct Accumulator
+    {
+        int samples = 0;
+        u64 lastSample = 0;
+        double gyroSum[3] = {};
+        double gyroSqSum[3] = {};
+        double accelSum[3] = {};
+        double accelSqSum[3] = {};
+    };
+    Accumulator result[2];
+
+    for (int frame = 0; frame < 150; frame++)
+    {
+        bool seen[2] = { false, false };
+        for (int padIndex = 0; padIndex < GAMEPADS_MAX; padIndex++)
+        {
+            PadState* pad = &padsState[padIndex];
+            padUpdate(pad);
+            const u32 style = pad->style_set;
+            refreshPadSixAxis(padIndex);
+            const PadSixAxis& sensors = m_pad_six_axis[padIndex];
+            const bool dual = (style & HidNpadStyleTag_NpadJoyDual) != 0;
+            const u32 connected = dual ? joyDualConnectedSideMask(padIndex, padGetAttributes(pad)) : 0;
+            for (int side = 0; side < 2; side++)
+            {
+                if (seen[side])
+                    continue;
+                const bool available = dual ? (connected & (1U << side)) != 0
+                    : (style & (side == 0 ? HidNpadStyleTag_NpadJoyLeft : HidNpadStyleTag_NpadJoyRight)) != 0;
+                const int sensorIndex = dual ? side : 0;
+                if (!available || sensorIndex >= sensors.count)
+                    continue;
+                seen[side] = true;
+                HidSixAxisSensorState sample = {};
+                if (hidGetSixAxisSensorStates(sensors.handles[sensorIndex], &sample, 1) != 1
+                    || sample.sampling_number == result[side].lastSample)
+                    continue;
+                result[side].lastSample = sample.sampling_number;
+                const float accel[3] = {
+                    -sample.acceleration.x, -sample.acceleration.z, sample.acceleration.y
+                };
+                const float gyro[3] = {
+                    sample.angular_velocity.x * 2.0f * M_PI,
+                    sample.angular_velocity.z * 2.0f * M_PI,
+                    -sample.angular_velocity.y * 2.0f * M_PI
+                };
+                bool finite = true;
+                for (int k = 0; k < 3; k++)
+                    finite = finite && std::isfinite(accel[k]) && std::isfinite(gyro[k]);
+                if (!finite)
+                    continue;
+                result[side].samples++;
+                for (int k = 0; k < 3; k++)
+                {
+                    result[side].gyroSum[k] += gyro[k];
+                    result[side].gyroSqSum[k] += gyro[k] * gyro[k];
+                    result[side].accelSum[k] += accel[k];
+                    result[side].accelSqSum[k] += accel[k] * accel[k];
+                }
+            }
+        }
+        std::this_thread::sleep_for(15ms);
+    }
+
+    MotionCalibration calibrated[2] = {};
+    for (int side = 0; side < 2; side++)
+    {
+        const Accumulator& source = result[side];
+        if (source.samples < 60)
+        {
+            Logger::warning("JOYCON_CALIBRATION: side={} insufficient samples={}", side, source.samples);
+            return false;
+        }
+        double accelNorm2 = 0.0;
+        double accelVariance = 0.0;
+        double gyroVariance = 0.0;
+        for (int k = 0; k < 3; k++)
+        {
+            const double accelMean = source.accelSum[k] / source.samples;
+            const double gyroMean = source.gyroSum[k] / source.samples;
+            calibrated[side].gravityReference[k] = static_cast<float>(accelMean);
+            calibrated[side].gyroBias[k] = static_cast<float>(gyroMean);
+            accelNorm2 += accelMean * accelMean;
+            accelVariance += std::max(0.0, source.accelSqSum[k] / source.samples - accelMean * accelMean);
+            gyroVariance += std::max(0.0, source.gyroSqSum[k] / source.samples - gyroMean * gyroMean);
+        }
+        if (accelNorm2 < 0.01 || accelVariance > accelNorm2 * 0.005
+            || gyroVariance > 0.025
+            || std::sqrt(calibrated[side].gyroBias[0] * calibrated[side].gyroBias[0]
+                + calibrated[side].gyroBias[1] * calibrated[side].gyroBias[1]
+                + calibrated[side].gyroBias[2] * calibrated[side].gyroBias[2]) > 0.6f)
+        {
+            Logger::warning("JOYCON_CALIBRATION: side={} unstable accelVar={} gyroVar={}",
+                side, accelVariance, gyroVariance);
+            return false;
+        }
+        calibrated[side].valid = true;
+    }
+    setMotionCalibration(HalfJoyConSide::LEFT, calibrated[0]);
+    setMotionCalibration(HalfJoyConSide::RIGHT, calibrated[1]);
+    Logger::info("JOYCON_CALIBRATION: both Joy-Con sensors calibrated");
+    return true;
+}
+
+static void alignFlatReference(float vector[3], const float reference[3])
+{
+    const float norm = std::sqrt(reference[0] * reference[0] + reference[1] * reference[1]
+        + reference[2] * reference[2]);
+    if (norm <= 0.01f)
+        return;
+    const float nx = reference[0] / norm;
+    const float ny = reference[1] / norm;
+    const float nz = reference[2] / norm;
+    if (nz < -0.9999f)
+    {
+        vector[1] = -vector[1];
+        vector[2] = -vector[2];
+        return;
+    }
+    const float kx = ny;
+    const float ky = -nx;
+    const float dot = 1.0f + nz;
+    const float vx = vector[0], vy = vector[1], vz = vector[2];
+    const float crossX = ky * vz, crossY = -kx * vz, crossZ = kx * vy - ky * vx;
+    const float secondX = ky * crossZ, secondY = -kx * crossZ;
+    const float secondZ = kx * crossY - ky * crossX;
+    vector[0] = vx + crossX + secondX / dot;
+    vector[1] = vy + crossY + secondY / dot;
+    vector[2] = vz + crossZ + secondZ / dot;
+}
+
 void SwitchInputManager::refreshPadSixAxis(int pad)
 {
     PadSixAxis& sixAxis = m_pad_six_axis[pad];
@@ -1033,6 +1196,17 @@ void SwitchInputManager::handleControllerSensors()
         const float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
              static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
              static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI) };
+        if (side == HalfJoyConSide::LEFT || side == HalfJoyConSide::RIGHT)
+        {
+            const MotionCalibration& calibration = m_motionCalibration[side == HalfJoyConSide::LEFT ? 0 : 1];
+            if (calibration.valid)
+            {
+                for (int k = 0; k < 3; k++)
+                    gyro[k] -= calibration.gyroBias[k];
+                alignFlatReference(accel, calibration.gravityReference);
+                alignFlatReference(gyro, calibration.gravityReference);
+            }
+        }
         const SixAxisRemap& remap = sixAxisRemapFor(side);
 
         auto accelState = SensorEvent{ index, SensorEventType::ACCEL, { 0, 0, 0 }, 0 };
@@ -1100,7 +1274,12 @@ void SwitchInputManager::handleControllerSensors()
                 sixaxis.acceleration.z);
 
         if (samples > 0)
-            fire(controllerIndex, sixaxis, side);
+        {
+            HalfJoyConSide sensorSide = side;
+            if (joyDual && side == HalfJoyConSide::NONE)
+                sensorSide = sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT;
+            fire(controllerIndex, sixaxis, sensorSide);
+        }
     }
     Application::setActiveEvent(true);
 }

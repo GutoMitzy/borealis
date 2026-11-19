@@ -68,6 +68,8 @@ class SwitchInputManager : public InputManager
     void clearVibration(int controller);
     void setHalfJoyConMapping(HalfJoyConSide side, const HalfJoyConMapping& mapping);
     void setHalfJoyConMappingEnabled(bool enabled);
+    void setJoyConInputMode(JoyConInputMode mode);
+    JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }
@@ -118,11 +120,8 @@ class SwitchInputManager : public InputManager
     void system_button_thread_fn(std::stop_token token);
     void processSystemButtonEvent(::Event* event, int button);
     void refreshHalfJoyConClaims();
-#ifndef __SWITCH2__
-    bool splitJoyDualController(int padIndex);
-    std::array<bool, GAMEPADS_MAX> joyDualSplitAttempted = { };
-#endif
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
+    JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)
     };

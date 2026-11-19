@@ -252,7 +252,7 @@ short SwitchInputManager::getControllersConnectedCount()
         else
             controllers++;
     }
-    return std::min(controllers, GAMEPADS_MAX);
+    return controllers > GAMEPADS_MAX ? GAMEPADS_MAX : controllers;
 }
 
 bool SwitchInputManager::resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
@@ -382,7 +382,6 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
 
         HidAnalogStickState stick = padGetStickPos(pad, sideIndex);
 #ifdef __SWITCH2__
-        const auto mouseSide = this->mouse.mouseSide(pad);
         if ((logicalSide == HalfJoyConSide::LEFT && mouseSide == PadPointerSide_Left)
             || (logicalSide == HalfJoyConSide::RIGHT && mouseSide == PadPointerSide_Right))
             stick = { };

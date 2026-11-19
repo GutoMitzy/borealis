@@ -184,7 +184,8 @@ class SwitchInputManager : public InputManager
     void refreshPadSixAxis(int pad);
     void upToDateMouseState();
     void hidInitializeKeyboardMap();
-    void updateControllerStateInner(ControllerState* state, PadState* pad);
+    bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side);
+    void updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide side = HalfJoyConSide::NONE, int padIndex = -1);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],
         unsigned short lowFreqMotor, unsigned short highFreqMotor);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],

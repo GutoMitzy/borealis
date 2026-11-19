@@ -397,6 +397,11 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
 #endif
         const auto stickAxes = halfJoyConStickAxes(
             logicalSide, static_cast<float>(stick.x) / 32767.0f, static_cast<float>(stick.y) / 32767.0f);
+        static unsigned stickDebugFrame = 0;
+        if ((stickDebugFrame++ % 120) == 0)
+            Logger::debug("JOYCON_STICK: pad={} side={} stick={} raw=({}, {}) axes=({}, {})",
+                padIndex, static_cast<int>(logicalSide), halfJoyConStickIndex(logicalSide),
+                stick.x, stick.y, stickAxes[0], stickAxes[1]);
         state->axes[LEFT_X] = stickAxes[0];
         state->axes[LEFT_Y] = stickAxes[1];
         state->axes[RIGHT_X] = 0;

@@ -345,9 +345,12 @@ void SwitchInputManager::updateControllerState(ControllerState* state, int contr
 void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide logicalSide, int padIndex)
 {
     padUpdate(pad);
-    uint64_t keysDown = padGetButtons(pad);
+    const uint64_t rawKeysDown = padGetButtons(pad);
+    uint64_t keysDown = rawKeysDown;
+    int mouseSideValue = -1;
 #ifdef __SWITCH2__
     const auto mouseSide = this->mouse.mouseSide(pad);
+    mouseSideValue = static_cast<int>(mouseSide);
     if (mouseSide == PadPointerSide_Left)
         keysDown &= ~(HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_StickL
             | HidNpadButton_StickLLeft | HidNpadButton_StickLRight | HidNpadButton_StickLUp | HidNpadButton_StickLDown);
@@ -365,12 +368,13 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
         if (lastJoyDualButtons[sideIndex] != keysDown)
         {
             lastJoyDualButtons[sideIndex] = keysDown;
-            sixAxisDebug("JOYCON_BUTTONS: pad=%d side=%d raw=0x%016llx L=%d R=%d ZL=%d ZR=%d LeftSL=%d LeftSR=%d RightSL=%d RightSR=%d",
-                padIndex, static_cast<int>(logicalSide), static_cast<unsigned long long>(keysDown),
-                (keysDown & HidNpadButton_L) != 0, (keysDown & HidNpadButton_R) != 0,
-                (keysDown & HidNpadButton_ZL) != 0, (keysDown & HidNpadButton_ZR) != 0,
-                (keysDown & HidNpadButton_LeftSL) != 0, (keysDown & HidNpadButton_LeftSR) != 0,
-                (keysDown & HidNpadButton_RightSL) != 0, (keysDown & HidNpadButton_RightSR) != 0);
+            sixAxisDebug("JOYCON_BUTTONS: pad=%d side=%d raw=0x%016llx filtered=0x%016llx mouseSide=%d L=%d R=%d ZL=%d ZR=%d LeftSL=%d LeftSR=%d RightSL=%d RightSR=%d",
+                padIndex, static_cast<int>(logicalSide), static_cast<unsigned long long>(rawKeysDown),
+                static_cast<unsigned long long>(keysDown), mouseSideValue,
+                (rawKeysDown & HidNpadButton_L) != 0, (rawKeysDown & HidNpadButton_R) != 0,
+                (rawKeysDown & HidNpadButton_ZL) != 0, (rawKeysDown & HidNpadButton_ZR) != 0,
+                (rawKeysDown & HidNpadButton_LeftSL) != 0, (rawKeysDown & HidNpadButton_LeftSR) != 0,
+                (rawKeysDown & HidNpadButton_RightSL) != 0, (rawKeysDown & HidNpadButton_RightSR) != 0);
         }
         int owner = -1;
         for (int i = 0; i < GAMEPADS_MAX; ++i)

@@ -31,6 +31,8 @@ using namespace brls;
 int main(){
     const auto left=defaultHalfJoyConMapping(HalfJoyConSide::LEFT);
     auto right=defaultHalfJoyConMapping(HalfJoyConSide::RIGHT);
+    assert(left[9]==BUTTON_LB&&left[10]==BUTTON_LT);
+    assert(right[9]==BUTTON_RB&&right[10]==BUTTON_RT);
     ControllerState state{};
     assert(halfJoyConSide(1)==HalfJoyConSide::NONE);
     assert(halfJoyConSide(8)==HalfJoyConSide::LEFT&&halfJoyConSide(16)==HalfJoyConSide::RIGHT);
@@ -43,9 +45,9 @@ int main(){
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_Plus,true,false);
     assert(state.buttons[BUTTON_START]&&state.buttons[BUTTON_BACK]);
     applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_L|HidNpadButton_ZL,false,false);
-    for(int i=0;i<BUTTON_NAV_UP;++i)assert(!state.buttons[i]);
+    assert(state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_R|HidNpadButton_ZR,false,false);
-    for(int i=0;i<BUTTON_NAV_UP;++i)assert(!state.buttons[i]);
+    assert(state.buttons[BUTTON_RB]&&state.buttons[BUTTON_RT]);
     const int targets[]={BUTTON_X,BUTTON_A,BUTTON_B,BUTTON_Y};
     for(auto side:{HalfJoyConSide::LEFT,HalfJoyConSide::RIGHT}){
         auto profile=defaultHalfJoyConMapping(side);

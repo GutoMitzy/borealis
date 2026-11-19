@@ -170,6 +170,7 @@ class SwitchInputManager : public InputManager
         u32 style;
     };
     HidSixAxisSensorHandle m_six_axis_sensor_handle_handheld;
+    bool m_six_axis_sensor_handheld_active = false;
     PadSixAxis m_pad_six_axis[GAMEPADS_MAX];
 
     std::vector<bool> m_hid_keyboard_state;

@@ -144,9 +144,18 @@ SwitchInputManager::SwitchInputManager()
 
     m_hid_keyboard_state.assign(256, false);
 
-    // Handheld has its own sixaxis handle; per-pad handles are acquired lazily in refreshPadSixAxis()
-    hidGetSixAxisSensorHandles(&this->m_six_axis_sensor_handle_handheld, 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
-    hidStartSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
+    // Handheld has its own sixaxis handle; per-pad handles are acquired lazily in refreshPadSixAxis().
+    Result handheldHandleResult = hidGetSixAxisSensorHandles(
+        &this->m_six_axis_sensor_handle_handheld, 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    if (R_FAILED(handheldHandleResult))
+        Logger::warning("SIXAXIS: handheld handle acquisition failed rc=0x{:x}", handheldHandleResult);
+    else
+    {
+        Result handheldStartResult = hidStartSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
+        m_six_axis_sensor_handheld_active = R_SUCCEEDED(handheldStartResult);
+        if (R_FAILED(handheldStartResult))
+            Logger::warning("SIXAXIS: handheld start failed rc=0x{:x}", handheldStartResult);
+    }
 
     for (auto& sixAxis : this->m_pad_six_axis)
         sixAxis = PadSixAxis{ };
@@ -165,7 +174,8 @@ SwitchInputManager::~SwitchInputManager()
         this->cursorTexture = 0;
     }
 
-    hidStopSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
+    if (m_six_axis_sensor_handheld_active)
+        hidStopSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
     for (auto& sixAxis : this->m_pad_six_axis)
         for (int i = 0; i < sixAxis.count; i++)
             hidStopSixAxisSensor(sixAxis.handles[i]);
@@ -612,13 +622,37 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
         return;
     }
 
-    hidGetSixAxisSensorHandles(sixAxis.handles, handleCount, (HidNpadIdType)pad, tag);
+    const Result handleResult = hidGetSixAxisSensorHandles(
+        sixAxis.handles, handleCount, (HidNpadIdType)pad, tag);
+    if (R_FAILED(handleResult))
+    {
+        Logger::warning("SIXAXIS: pad={} style=0x{:x} handle acquisition failed rc=0x{:x}",
+            pad, style, handleResult);
+        sixAxisDebug("ACQUIRE_FAILED pad=%d style=0x%x tag=0x%x rc=0x%x",
+            pad, style, static_cast<unsigned>(tag), handleResult);
+        return;
+    }
+
     for (int i = 0; i < handleCount; i++)
-        hidStartSixAxisSensor(sixAxis.handles[i]);
+    {
+        const Result startResult = hidStartSixAxisSensor(sixAxis.handles[i]);
+        if (R_FAILED(startResult))
+        {
+            for (int started = 0; started < i; started++)
+                hidStopSixAxisSensor(sixAxis.handles[started]);
+            Logger::warning("SIXAXIS: pad={} style=0x{:x} start failed handle={} rc=0x{:x}",
+                pad, style, i, startResult);
+            sixAxisDebug("START_FAILED pad=%d style=0x%x handle=%d rc=0x%x",
+                pad, style, i, startResult);
+            return;
+        }
+    }
+
     sixAxis.count = handleCount;
-    Logger::info("SIXAXIS: pad={} style=0x{:x} handles={}", pad, style, handleCount);
-    sixAxisDebug("ACQUIRE pad=%d style=0x%x handles=%d h0=0x%x h1=0x%x", pad, style, handleCount,
-        sixAxis.handles[0].type_value, handleCount > 1 ? sixAxis.handles[1].type_value : 0);
+    Logger::info("SIXAXIS: pad={} style=0x{:x} tag=0x{:x} handles={} acquired",
+        pad, style, static_cast<unsigned>(tag), handleCount);
+    sixAxisDebug("ACQUIRE pad=%d style=0x%x tag=0x%x handles=%d",
+        pad, style, static_cast<unsigned>(tag), handleCount);
 }
 
 void SwitchInputManager::handleControllerSensors()
@@ -651,8 +685,14 @@ void SwitchInputManager::handleControllerSensors()
     if (handheld)
     {
         HidSixAxisSensorState sixaxis = { 0 };
-        hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld, &sixaxis, 1);
-        fire(controllerIndex++, sixaxis, HalfJoyConSide::NONE);
+        const size_t samples = m_six_axis_sensor_handheld_active
+            ? hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld, &sixaxis, 1)
+            : 0;
+        if (samples > 0)
+            fire(controllerIndex, sixaxis, HalfJoyConSide::NONE);
+        else if (debugTick)
+            sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
+        controllerIndex++;
     }
 
     // Same indexing as getControllersConnectedCount() / updateControllerState()
@@ -667,25 +707,32 @@ void SwitchInputManager::handleControllerSensors()
         size_t samples                = 0;
         const u64 attrib              = padGetAttributes(&padsState[i]);
         const PadSixAxis& padSixAxis  = m_pad_six_axis[i];
+        int selectedHandle            = -1;
         if (padSixAxis.count == 2)
         {
-            // JoyDual: read from the Left or the Right Joy-Con depending on which one is connected
+            // JoyDual exposes two sensor handles. Select only the physically connected side.
             if (attrib & HidNpadAttribute_IsLeftConnected)
-                samples = hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+                selectedHandle = 0;
             else if (attrib & HidNpadAttribute_IsRightConnected)
-                samples = hidGetSixAxisSensorStates(padSixAxis.handles[1], &sixaxis, 1);
+                selectedHandle = 1;
         }
         else if (padSixAxis.count == 1)
-            samples = hidGetSixAxisSensorStates(padSixAxis.handles[0], &sixaxis, 1);
+            selectedHandle = 0;
+
+        if (selectedHandle >= 0)
+            samples = hidGetSixAxisSensorStates(padSixAxis.handles[selectedHandle], &sixaxis, 1);
 
         if (debugTick)
-            sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d samples=%zu "
+            sixAxisDebug("DATA ctl=%d pad=%d style=0x%x attrib=0x%llx handles=%d selected=%d samples=%zu "
                          "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
-                controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count, samples,
-                sixaxis.angular_velocity.x, sixaxis.angular_velocity.y, sixaxis.angular_velocity.z,
-                sixaxis.acceleration.x, sixaxis.acceleration.y, sixaxis.acceleration.z);
+                controllerIndex, i, padsState[i].style_set, (unsigned long long)attrib, padSixAxis.count,
+                selectedHandle, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
+                sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
+                sixaxis.acceleration.z);
 
-        fire(controllerIndex++, sixaxis, halfJoyConSide(padsState[i].style_set));
+        if (samples > 0)
+            fire(controllerIndex, sixaxis, halfJoyConSide(padsState[i].style_set));
+        controllerIndex++;
     }
     Application::setActiveEvent(true);
 }

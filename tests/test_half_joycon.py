@@ -14,12 +14,17 @@ def main():
     cxx = shutil.which("c++") or shutil.which("g++")
     if not cxx:
         raise SystemExit("A host C++ compiler is required for half-Joy-Con tests")
-    app = ROOT.parents[1]
-    sdk = app / "build/switch2-ci/sdk-20261115b/libounce/include/switch/services/hid.h"
-    if not sdk.is_file():
-        import os
+    import os
 
-        sdk = Path(os.environ["DEVKITPRO"]) / "libounce/include/switch/services/hid.h"
+    app = ROOT.parents[1]
+    candidates = [
+        app / "build/switch2-ci/sdk-20261115b/libounce/include/switch/services/hid.h",
+        Path(os.environ.get("DEVKITPRO", "/nonexistent")) / "libounce/include/switch/services/hid.h",
+        Path(os.environ.get("LIBNX_INCLUDE", "/nonexistent")) / "switch/services/hid.h",
+    ]
+    sdk = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if sdk is None:
+        raise SystemExit("Set DEVKITPRO or LIBNX_INCLUDE to a Switch SDK include directory")
     hid = sdk.read_text()
     buttons = re.search(r"typedef enum \{[^}]+\} HidNpadButton;", hid)[0]
     core = (ROOT / "library/include/borealis/core/input.hpp").read_text()

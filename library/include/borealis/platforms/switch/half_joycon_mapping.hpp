@@ -38,9 +38,7 @@ inline bool validHalfJoyConAction(int action)
 inline HalfJoyConMapping defaultHalfJoyConMapping(HalfJoyConSide side)
 {
     // Face positions are relative to the controller held horizontally.
-    return { BUTTON_X, BUTTON_A, BUTTON_B, BUTTON_Y, BUTTON_LSB,
-        side == HalfJoyConSide::LEFT ? BUTTON_LB : BUTTON_RB,
-        BUTTON_RB,
+    return { BUTTON_X, BUTTON_A, BUTTON_B, BUTTON_Y, BUTTON_LSB, BUTTON_LB, BUTTON_RB,
         side == HalfJoyConSide::LEFT ? BUTTON_BACK : BUTTON_START,
         side == HalfJoyConSide::LEFT ? BUTTON_START : BUTTON_BACK,
         side == HalfJoyConSide::LEFT ? BUTTON_LB : BUTTON_RB,

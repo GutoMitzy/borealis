@@ -72,6 +72,15 @@ class SwitchInputManager : public InputManager
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     void setJoyConPairGyroMode(JoyConPairGyroMode mode);
     JoyConPairGyroMode getJoyConPairGyroMode() const { return joyConPairGyroMode; }
+    struct MotionCalibration
+    {
+        bool valid = false;
+        float gyroBias[3] = { 0.0f, 0.0f, 0.0f };
+        float gravityReference[3] = { 0.0f, 0.0f, 1.0f };
+    };
+    bool calibrateJoyConsOnFlatSurface();
+    MotionCalibration getMotionCalibration(HalfJoyConSide side) const;
+    void setMotionCalibration(HalfJoyConSide side, const MotionCalibration& calibration);
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }
@@ -182,6 +191,7 @@ class SwitchInputManager : public InputManager
     HidSixAxisSensorHandle m_six_axis_sensor_handle_handheld;
     bool m_six_axis_sensor_handheld_active = false;
     PadSixAxis m_pad_six_axis[GAMEPADS_MAX];
+    std::array<MotionCalibration, 2> m_motionCalibration = {};
 
     std::vector<bool> m_hid_keyboard_state;
     std::unordered_map<int, BrlsKeyboardScancode> m_hid_brls_map;

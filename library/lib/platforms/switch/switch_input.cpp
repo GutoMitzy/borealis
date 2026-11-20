@@ -383,7 +383,7 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
     if (controller < 0)
         return false;
 
-    padUpdate(&this->padStateHandheld);
+    padUpdate(&padStateHandheld);
     int logicalIndex = 0;
     if (padStateHandheld.active_handheld)
     {
@@ -397,70 +397,64 @@ bool SwitchInputManager::resolveController(int controller, PadState** pad, int* 
         logicalIndex++;
     }
 
-    for (int pass = 0; pass < 3 && logicalIndex < GAMEPADS_MAX; pass++)
+    for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; ++i)
     {
-        for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; i++)
+        padUpdate(&padsState[i]);
+        if (padsState[i].style_set == 0)
+            continue;
+
+        const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
+        if (joyDual)
         {
-            padUpdate(&padsState[i]);
-            if (padsState[i].style_set == 0)
-                continue;
-
-            const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-            if (joyDual)
+            const u64 attrib = padGetAttributes(&padsState[i]);
+            const u32 sides = joyDualConnectedSideMask(i, attrib);
+            const bool left = (sides & 1U) != 0;
+            const bool right = (sides & 2U) != 0;
+            if (joyConInputMode == JoyConInputMode::PAIRED && left && right)
             {
-                const u64 attrib = padGetAttributes(&padsState[i]);
-                const u32 connectedSides = joyDualConnectedSideMask(i, attrib);
-                const bool leftConnected = (connectedSides & 1U) != 0;
-                const bool rightConnected = (connectedSides & 2U) != 0;
-                const bool paired = joyConInputMode == JoyConInputMode::PAIRED
-                    && leftConnected && rightConnected;
-
-                if (paired)
-                {
-                    if (pass != 2)
-                        continue;
-
-                    if (controller == logicalIndex)
-                    {
-                        *pad = &padsState[i];
-                        *padIndex = i;
-                        *side = HalfJoyConSide::NONE;
-                        return true;
-                    }
-                    logicalIndex++;
-                    continue;
-                }
-
-                const bool connected = pass == 0 ? leftConnected : pass == 1 && rightConnected;
-                if (!connected)
-                    continue;
-
-                const HalfJoyConSide logicalSide = pass == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT;
                 if (controller == logicalIndex)
                 {
                     *pad = &padsState[i];
                     *padIndex = i;
-                    *side = logicalSide;
+                    *side = HalfJoyConSide::NONE;
                     return true;
                 }
-                logicalIndex++;
+                ++logicalIndex;
                 continue;
             }
-
-            const HalfJoyConSide physicalSide = halfJoyConSide(padsState[i].style_set);
-            const bool selected = halfJoyConOrder(physicalSide) == pass;
-            if (!selected)
-                continue;
-
-            if (controller == logicalIndex)
+            if (left)
             {
-                *pad = &padsState[i];
-                *padIndex = i;
-                *side = physicalSide;
-                return true;
+                if (controller == logicalIndex)
+                {
+                    *pad = &padsState[i];
+                    *padIndex = i;
+                    *side = HalfJoyConSide::LEFT;
+                    return true;
+                }
+                ++logicalIndex;
             }
-            logicalIndex++;
+            if (right)
+            {
+                if (controller == logicalIndex)
+                {
+                    *pad = &padsState[i];
+                    *padIndex = i;
+                    *side = HalfJoyConSide::RIGHT;
+                    return true;
+                }
+                ++logicalIndex;
+            }
+            continue;
         }
+
+        if (controller == logicalIndex)
+        {
+            *pad = &padsState[i];
+            *padIndex = i;
+            *side = halfJoyConSide(padsState[i].style_set);
+            return true;
+        }
+        ++logicalIndex;
     }
     return false;
 }
@@ -1296,10 +1290,22 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
 
         if (mode == JoyConInputMode::SEPARATE)
         {
-            const Result firstResult = hidSetNpadJoyAssignmentModeSingle(
-                firstId, HidNpadJoyDeviceType_Left);
-            const Result secondResult = hidSetNpadJoyAssignmentModeSingle(
-                secondId, HidNpadJoyDeviceType_Right);
+            padUpdate(&padsState[first]);
+            padUpdate(&padsState[first + 1]);
+            const u32 firstStyle = padsState[first].style_set;
+            const u32 secondStyle = padsState[first + 1].style_set;
+            const Result firstResult =
+                (firstStyle & HidNpadStyleTag_NpadJoyLeft) != 0
+                ? hidSetNpadJoyAssignmentModeSingle(firstId, HidNpadJoyDeviceType_Left)
+                : (firstStyle & HidNpadStyleTag_NpadJoyRight) != 0
+                ? hidSetNpadJoyAssignmentModeSingle(firstId, HidNpadJoyDeviceType_Right)
+                : 0;
+            const Result secondResult =
+                (secondStyle & HidNpadStyleTag_NpadJoyLeft) != 0
+                ? hidSetNpadJoyAssignmentModeSingle(secondId, HidNpadJoyDeviceType_Left)
+                : (secondStyle & HidNpadStyleTag_NpadJoyRight) != 0
+                ? hidSetNpadJoyAssignmentModeSingle(secondId, HidNpadJoyDeviceType_Right)
+                : 0;
             if (R_FAILED(firstResult) || R_FAILED(secondResult))
                 Logger::warning("JOYCON_MODE: split assignment failed slots={}+{} leftRc=0x{:x} rightRc=0x{:x}",
                     first, first + 1, firstResult, secondResult);

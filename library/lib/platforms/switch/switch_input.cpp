@@ -227,7 +227,7 @@ SwitchInputManager::SwitchInputManager()
             Logger::warning("SIXAXIS: handheld start failed rc=0x{:x}", handheldStartResult);
         else
         {
-            const Result driftResult = hidSetGyroscopeZeroDriftMode(this->m_six_axis_sensor_handle_handheld, HidGyroscopeZeroDriftMode_Standard);
+            const Result driftResult = hidSetGyroscopeZeroDriftMode(this->m_six_axis_sensor_handle_handheld, HidGyroscopeZeroDriftMode_Loose);
             if (R_FAILED(driftResult))
                 Logger::warning("SIXAXIS: handheld drift correction failed rc=0x{:x}", driftResult);
         }
@@ -1050,7 +1050,7 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
 
     for (int i = 0; i < handleCount; i++)
     {
-        const Result driftResult = hidSetGyroscopeZeroDriftMode(sixAxis.handles[i], HidGyroscopeZeroDriftMode_Standard);
+        const Result driftResult = hidSetGyroscopeZeroDriftMode(sixAxis.handles[i], HidGyroscopeZeroDriftMode_Loose);
         if (R_FAILED(driftResult))
             Logger::warning("SIXAXIS: pad={} handle={} drift correction failed rc=0x{:x}", pad, i, driftResult);
     }

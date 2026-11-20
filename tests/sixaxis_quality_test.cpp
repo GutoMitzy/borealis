@@ -21,7 +21,16 @@ int main()
     for (std::uint64_t sample = 2; sample <= 100; ++sample)
         assert(right.process(gravity, bias, sample, true, corrected));
     assert(right.calibrationSamples == 0);
-    assert(right.bias[0] == 0.0f);
+    assert(std::fabs(right.bias[0] - bias[0]) < 1e-5f);
+    assert(std::fabs(corrected[0]) < 1e-5f);
+
+    // A second controller calibrates independently during stationary periods.
+    const float leftRestBias[3] = {-0.021f, 0.008f, 0.017f};
+    for (std::uint64_t sample = 1; sample <= 40; ++sample)
+        assert(left.process(gravity, leftRestBias, sample, true, corrected));
+    assert(std::fabs(left.bias[0] - leftRestBias[0]) < 1e-5f);
+    assert(std::fabs(corrected[0]) < 1e-5f);
+    left.reset();
 
     right.beginCalibration();
     assert(right.calibrationRequested);

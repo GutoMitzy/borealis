@@ -244,6 +244,7 @@ struct SensorEvent
     SensorEventType type;
     float data[3];
     uint32_t timestamp;
+    bool atRest = false;
 };
 
 // Represents the state of the controller (a gamepad or a keyboard) in the current frame

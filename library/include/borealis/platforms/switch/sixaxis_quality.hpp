@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 
@@ -14,6 +15,7 @@ struct SixAxisQuality
     unsigned calibrationSamples = 0;
     bool hasSamplingNumber = false;
     bool calibrationRequested = false;
+    std::chrono::steady_clock::time_point calibrationStart = {};
 
     void reset()
     {
@@ -25,12 +27,14 @@ struct SixAxisQuality
         lastSamplingNumber = 0;
         calibrationSamples = 0;
         calibrationRequested = false;
+        calibrationStart = {};
         hasSamplingNumber = false;
     }
 
     void beginCalibration()
     {
         calibrationRequested = true;
+        calibrationStart = std::chrono::steady_clock::now();
         calibrationSamples = 0;
         for (float& sum : calibrationSum)
             sum = 0.0f;
@@ -58,6 +62,14 @@ struct SixAxisQuality
 
         hasSamplingNumber = true;
         lastSamplingNumber = samplingNumber;
+
+        if (calibrationRequested &&
+            std::chrono::steady_clock::now() - calibrationStart >
+                std::chrono::seconds(5))
+        {
+            calibrationRequested = false;
+            calibrationSamples = 0;
+        }
 
         if (calibrationRequested)
         {

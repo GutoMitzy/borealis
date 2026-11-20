@@ -1106,10 +1106,10 @@ void SwitchInputManager::handleControllerSensors()
             gyroState.data[k] = correctedGyro[k];
         }
         if (debugTick)
-            sixAxisDebug("QUALITY ctl=%d side=%d sample=%llu rest=%d stationary=%u bias=(%.5f %.5f %.5f) gyro=(%.3f %.3f %.3f)",
+            sixAxisDebug("QUALITY ctl=%d side=%d sample=%llu rest=%d calibrationSamples=%u bias=(%.5f %.5f %.5f) gyro=(%.3f %.3f %.3f)",
                 index, static_cast<int>(side),
                 static_cast<unsigned long long>(sixaxis.sampling_number),
-                static_cast<int>(atRest), quality.stationarySamples,
+                static_cast<int>(atRest), quality.calibrationSamples,
                 quality.bias[0], quality.bias[1], quality.bias[2],
                 correctedGyro[0], correctedGyro[1], correctedGyro[2]);
         getControllerSensorStateChanged()->fire(accelState);

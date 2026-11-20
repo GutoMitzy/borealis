@@ -1174,9 +1174,11 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
-            for (size_t sample = samples; sample-- > 0;)
-                fire(controllerIndex, -1, 0, sixaxis[sample], HalfJoyConSide::NONE,
-                     R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
+            forEachOldestMotionSample(sixaxis, samples,
+                [&](const HidSixAxisSensorState& sample) {
+                    fire(controllerIndex, -1, 0, sample, HalfJoyConSide::NONE,
+                         R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
+                });
         }
         else if (debugTick)
             sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
@@ -1223,10 +1225,12 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(padSixAxis.handles[sensor], &atRest);
-            for (size_t sample = samples; sample-- > 0;)
-                fire(controllerIndex, padIndex, sensor, sixaxis[sample], side,
-                     R_SUCCEEDED(restResult) && atRest,
-                     m_pad_six_axis[padIndex].quality[sensor]);
+            forEachOldestMotionSample(sixaxis, samples,
+                [&](const HidSixAxisSensorState& sample) {
+                    fire(controllerIndex, padIndex, sensor, sample, side,
+                         R_SUCCEEDED(restResult) && atRest,
+                         m_pad_six_axis[padIndex].quality[sensor]);
+                });
         }
     }
     Application::setActiveEvent(true);

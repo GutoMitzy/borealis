@@ -392,6 +392,34 @@ void SwitchInputManager::requestSixAxisManualCalibration()
     Logger::info("SIXAXIS: manual calibration requested; keep Joy-Cons still");
 }
 
+bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
+{
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side))
+        return false;
+
+    if (padIndex < 0)
+    {
+        m_handheld_sixaxis_quality.beginCalibration();
+        Logger::info("SIXAXIS: handheld calibration requested");
+        return true;
+    }
+
+    refreshPadSixAxis(padIndex);
+    PadSixAxis& sixAxis = m_pad_six_axis[padIndex];
+    const bool dual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
+    const int sensor = dual && side == HalfJoyConSide::RIGHT ? 1 : 0;
+    if (sensor >= sixAxis.count)
+        return false;
+
+    sixAxis.quality[sensor].beginCalibration();
+    Logger::info("SIXAXIS: calibration requested for ctl={} pad={} sensor={}",
+                 controller, padIndex, sensor);
+    return true;
+}
+
 int SwitchInputManager::getPreferredRightJoyConController()
 {
     const int count = getControllersConnectedCount();

@@ -20,6 +20,7 @@
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
+#include <borealis/platforms/switch/switch_dsu_motion.hpp>
 #include <cstdarg>
 #include <cstdio>
 #ifdef __SWITCH2__
@@ -235,6 +236,7 @@ SwitchInputManager::SwitchInputManager()
 
 SwitchInputManager::~SwitchInputManager()
 {
+    SwitchDsuMotionServer::instance().stop();
     this->system_button_thread.request_stop();
     if (this->system_button_thread.joinable())
         this->system_button_thread.join();
@@ -1184,6 +1186,8 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
 
 void SwitchInputManager::handleControllerSensors()
 {
+    if (m_dsuMotionEnabled)
+        SwitchDsuMotionServer::instance().poll();
     padUpdate(&this->padStateHandheld);
     const bool handheld = padStateHandheld.active_handheld;
     int controllerIndex = 0;
@@ -1278,7 +1282,69 @@ void SwitchInputManager::handleControllerSensors()
             HalfJoyConSide sensorSide = side;
             if (joyDual && side == HalfJoyConSide::NONE)
                 sensorSide = sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT;
-            fire(controllerIndex, sixaxis, sensorSide);
+            if (!m_dsuMotionEnabled || sensorSide == HalfJoyConSide::NONE)
+                fire(controllerIndex, sixaxis, sensorSide);
+        }
+    }
+    if (m_dsuMotionEnabled)
+    {
+        bool seen[2] = { false, false };
+        for (int padIndex = 0; padIndex < GAMEPADS_MAX; padIndex++)
+        {
+            PadState& pad = padsState[padIndex];
+            padUpdate(&pad);
+            refreshPadSixAxis(padIndex);
+            const u32 style = pad.style_set;
+            const bool dual = (style & HidNpadStyleTag_NpadJoyDual) != 0;
+            const u32 mask = dual ? joyDualConnectedSideMask(padIndex, padGetAttributes(&pad)) : 0;
+            const PadSixAxis& handles = m_pad_six_axis[padIndex];
+            for (int side = 0; side < 2; side++)
+            {
+                if (seen[side])
+                    continue;
+                const bool connected = dual ? (mask & (1U << side)) != 0
+                    : (style & (side == 0 ? HidNpadStyleTag_NpadJoyLeft : HidNpadStyleTag_NpadJoyRight)) != 0;
+                const int handle = dual ? side : 0;
+                if (!connected || handle >= handles.count)
+                    continue;
+                HidSixAxisSensorState sample = {};
+                if (hidGetSixAxisSensorStates(handles.handles[handle], &sample, 1) != 1)
+                    continue;
+                seen[side] = true;
+                float accel[3] = {
+                    -sample.acceleration.x, -sample.acceleration.z, sample.acceleration.y
+                };
+                float gyro[3] = {
+                    sample.angular_velocity.x * 2.0f * M_PI,
+                    sample.angular_velocity.z * 2.0f * M_PI,
+                    -sample.angular_velocity.y * 2.0f * M_PI
+                };
+                const MotionCalibration& calibration = m_motionCalibration[side];
+                if (calibration.valid)
+                {
+                    for (int axis = 0; axis < 3; axis++)
+                        gyro[axis] -= calibration.gyroBias[axis];
+                    alignFlatReference(accel, calibration.gravityReference);
+                    alignFlatReference(gyro, calibration.gravityReference);
+                }
+                const float base = calibration.valid
+                    ? std::sqrt(calibration.gravityReference[0] * calibration.gravityReference[0]
+                        + calibration.gravityReference[1] * calibration.gravityReference[1]
+                        + calibration.gravityReference[2] * calibration.gravityReference[2])
+                    : 1.0f;
+                if (base > 0.01f)
+                    for (float& value : accel)
+                        value /= base;
+                const SixAxisRemap& remap = side == 0
+                    ? SIXAXIS_REMAP_JOYCON_LEFT : SIXAXIS_REMAP_JOYCON_RIGHT;
+                float correctedAccel[3], correctedGyro[3];
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    correctedAccel[axis] = accel[remap.axis[axis]] * remap.sign[axis];
+                    correctedGyro[axis] = gyro[remap.axis[axis]] * remap.sign[axis];
+                }
+                SwitchDsuMotionServer::instance().publish(side, correctedAccel, correctedGyro);
+            }
         }
     }
     Application::setActiveEvent(true);
@@ -1555,6 +1621,25 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
     Logger::info("JOYCON_MODE: mode={} holdType={}",
         static_cast<int>(mode), static_cast<int>(holdType));
     refreshHalfJoyConClaims();
+}
+
+bool SwitchInputManager::setDsuMotionEnabled(bool enabled)
+{
+    if (!enabled)
+    {
+        m_dsuMotionEnabled = false;
+        SwitchDsuMotionServer::instance().stop();
+        return true;
+    }
+    if (!SwitchDsuMotionServer::instance().start())
+    {
+        Logger::warning("JOYCON_DSU: failed to bind UDP port 26760");
+        m_dsuMotionEnabled = false;
+        return false;
+    }
+    m_dsuMotionEnabled = true;
+    Logger::info("JOYCON_DSU: listening on UDP port 26760, left=slot0 right=slot1");
+    return true;
 }
 
 void SwitchInputManager::setJoyConPairGyroMode(JoyConPairGyroMode mode)

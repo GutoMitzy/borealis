@@ -225,6 +225,12 @@ SwitchInputManager::SwitchInputManager()
         m_six_axis_sensor_handheld_active = R_SUCCEEDED(handheldStartResult);
         if (R_FAILED(handheldStartResult))
             Logger::warning("SIXAXIS: handheld start failed rc=0x{:x}", handheldStartResult);
+        else
+        {
+            const Result driftResult = hidSetGyroscopeZeroDriftMode(this->m_six_axis_sensor_handle_handheld, HidGyroscopeZeroDriftMode_Tight);
+            if (R_FAILED(driftResult))
+                Logger::warning("SIXAXIS: handheld drift correction failed rc=0x{:x}", driftResult);
+        }
     }
 
     for (auto& sixAxis : this->m_pad_six_axis)
@@ -989,6 +995,13 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
         }
     }
 
+    for (int i = 0; i < handleCount; i++)
+    {
+        const Result driftResult = hidSetGyroscopeZeroDriftMode(sixAxis.handles[i], HidGyroscopeZeroDriftMode_Tight);
+        if (R_FAILED(driftResult))
+            Logger::warning("SIXAXIS: pad={} handle={} drift correction failed rc=0x{:x}", pad, i, driftResult);
+    }
+
     sixAxis.count = handleCount;
     Logger::info("SIXAXIS: pad={} style=0x{:x} tag=0x{:x} handles={} acquired",
         pad, style, static_cast<unsigned>(tag), handleCount);
@@ -1006,7 +1019,7 @@ void SwitchInputManager::handleControllerSensors()
 
     auto fire = [&](int index, const HidSixAxisSensorState& sixaxis, HalfJoyConSide side)
     {
-        const float accel[3] = { -sixaxis.acceleration.x, -sixaxis.acceleration.z, sixaxis.acceleration.y };
+        const float accel[3] = { -sixaxis.acceleration.x * 9.80665f, -sixaxis.acceleration.z * 9.80665f, sixaxis.acceleration.y * 9.80665f };
         const float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
              static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
              static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI) };

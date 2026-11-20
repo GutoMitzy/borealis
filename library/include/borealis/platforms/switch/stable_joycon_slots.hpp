@@ -27,8 +27,58 @@ struct StableJoyConSlot
 
 template <std::size_t N>
 std::vector<StableJoyConSlot> stableJoyConSlots(
-    const std::array<StableJoyConPad, N>& pads, bool paired)
+    const std::array<StableJoyConPad, N>& pads, bool paired,
+    bool reserveMissingSides = false)
 {
+    if (reserveMissingSides && !paired)
+    {
+        bool hasJoyCon = false;
+        bool hasOtherController = false;
+        std::size_t lastJoyConGroup = 0;
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            const auto& pad = pads[i];
+            if (!pad.present)
+                continue;
+            if (pad.left || pad.right)
+            {
+                hasJoyCon = true;
+                lastJoyConGroup = i / 2;
+            }
+            else
+            {
+                hasOtherController = true;
+            }
+        }
+        if (hasJoyCon && !hasOtherController)
+        {
+            std::vector<StableJoyConSlot> result;
+            result.reserve((lastJoyConGroup + 1) * 2);
+            for (std::size_t group = 0; group <= lastJoyConGroup; ++group)
+            {
+                const std::size_t first = group * 2;
+                const std::size_t last = first + 2 < N ? first + 2 : N;
+                int leftPad = -1;
+                int rightPad = -1;
+                for (std::size_t i = first; i < last; ++i)
+                {
+                    const auto& pad = pads[i];
+                    if (!pad.present)
+                        continue;
+                    if (pad.left && leftPad == -1)
+                        leftPad = static_cast<int>(i);
+                    if (pad.right && rightPad == -1)
+                        rightPad = static_cast<int>(i);
+                }
+                result.push_back({leftPad, 1});
+                result.push_back({rightPad, 2});
+            }
+            if (result.size() > N)
+                result.resize(N);
+            return result;
+        }
+    }
+
     std::vector<StableJoyConSlot> result;
     result.reserve(N);
     for (std::size_t base = 0; base < N; base += 2)

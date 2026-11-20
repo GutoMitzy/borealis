@@ -1337,6 +1337,10 @@ void SwitchInputManager::handleControllerSensors()
                         value /= base;
                 const SixAxisRemap& remap = side == 0
                     ? SIXAXIS_REMAP_JOYCON_LEFT : SIXAXIS_REMAP_JOYCON_RIGHT;
+                accel[1] = -accel[1];
+                accel[2] = -accel[2];
+                gyro[1] = -gyro[1];
+                gyro[2] = -gyro[2];
                 float correctedAccel[3], correctedGyro[3];
                 for (int axis = 0; axis < 3; axis++)
                 {

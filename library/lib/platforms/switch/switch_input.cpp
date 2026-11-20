@@ -227,7 +227,7 @@ SwitchInputManager::SwitchInputManager()
             Logger::warning("SIXAXIS: handheld start failed rc=0x{:x}", handheldStartResult);
         else
         {
-            const Result driftResult = hidSetGyroscopeZeroDriftMode(this->m_six_axis_sensor_handle_handheld, HidGyroscopeZeroDriftMode_Tight);
+            const Result driftResult = hidSetGyroscopeZeroDriftMode(this->m_six_axis_sensor_handle_handheld, HidGyroscopeZeroDriftMode_Standard);
             if (R_FAILED(driftResult))
                 Logger::warning("SIXAXIS: handheld drift correction failed rc=0x{:x}", driftResult);
         }
@@ -380,6 +380,15 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
         state->buttons[BUTTON_A] |= getKeyboardKeyState(BRLS_KBD_KEY_ENTER);
         state->buttons[BUTTON_B] |= getKeyboardKeyState(BRLS_KBD_KEY_ESCAPE);
     }
+}
+
+void SwitchInputManager::requestSixAxisManualCalibration()
+{
+    m_handheld_sixaxis_quality.beginCalibration();
+    for (auto& pad : m_pad_six_axis)
+        for (auto& quality : pad.quality)
+            quality.beginCalibration();
+    Logger::info("SIXAXIS: manual calibration requested; keep Joy-Cons still");
 }
 
 int SwitchInputManager::getPreferredRightJoyConController()
@@ -1041,7 +1050,7 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
 
     for (int i = 0; i < handleCount; i++)
     {
-        const Result driftResult = hidSetGyroscopeZeroDriftMode(sixAxis.handles[i], HidGyroscopeZeroDriftMode_Tight);
+        const Result driftResult = hidSetGyroscopeZeroDriftMode(sixAxis.handles[i], HidGyroscopeZeroDriftMode_Standard);
         if (R_FAILED(driftResult))
             Logger::warning("SIXAXIS: pad={} handle={} drift correction failed rc=0x{:x}", pad, i, driftResult);
     }

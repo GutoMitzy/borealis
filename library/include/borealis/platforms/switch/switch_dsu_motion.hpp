@@ -27,13 +27,14 @@ public:
     {
         if (m_socket >= 0)
             return true;
-        if (!m_socketServiceReady)
+        m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (m_socket < 0 && !m_socketServiceReady)
         {
             if (R_FAILED(socketInitializeDefault()))
                 return false;
             m_socketServiceReady = true;
+            m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         }
-        m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (m_socket < 0)
             return false;
         sockaddr_in local = {};

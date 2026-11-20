@@ -16,11 +16,11 @@ int main()
     assert(right.process(gravity, bias, 1, true, corrected));
     assert(std::fabs(corrected[0] - bias[0]) < 1e-6f);
     assert(!right.process(gravity, bias, 1, true, corrected));
-    assert(right.stationarySamples == 0);
+    assert(right.calibrationSamples == 0);
 
     for (std::uint64_t sample = 2; sample <= 100; ++sample)
         assert(right.process(gravity, bias, sample, true, corrected));
-    assert(right.stationarySamples == 0);
+    assert(right.calibrationSamples == 0);
     assert(right.bias[0] == 0.0f);
 
     right.beginCalibration();

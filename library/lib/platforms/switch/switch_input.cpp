@@ -1610,6 +1610,8 @@ void SwitchInputManager::processSystemButtonEvent(::Event* event, int button)
         }
         halfConsumed = halfMappingEnabled && owner >= 0 && owner < GAMEPADS_MAX
             && (halfSystemClaims[owner].load() & (1U << button));
+        if (mode->load() != ButtonOverrideMode::NONE)
+            halfConsumed = false;
     }
     if (!halfConsumed && mode->load() == ButtonOverrideMode::NONE)
         return;

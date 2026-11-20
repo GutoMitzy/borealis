@@ -1147,14 +1147,22 @@ void SwitchInputManager::handleControllerSensors()
         controllerIndex++;
     }
 
-    const int connectedControllers = getControllersConnectedCount();
-    for (; controllerIndex < connectedControllers && controllerIndex < GAMEPADS_MAX; controllerIndex++)
+    // Take one consistent HID-slot snapshot per sensor polling pass.
+    // Resolving every logical controller separately would rescan all
+    // physical pads several times, especially with four Joy-Cons.
+    const auto logicalSlots = collectStableJoyConSlots();
+    const int connectedControllers = std::min(
+        static_cast<int>(logicalSlots.size()) + (handheld ? 1 : 0),
+        static_cast<int>(GAMEPADS_MAX));
+    for (; controllerIndex < connectedControllers; controllerIndex++)
     {
-        PadState* pad = nullptr;
-        int padIndex = -1;
-        HalfJoyConSide side = HalfJoyConSide::NONE;
-        if (!resolveController(controllerIndex, &pad, &padIndex, &side) || padIndex < 0)
+        const int slotIndex = controllerIndex - (handheld ? 1 : 0);
+        const auto& slot = logicalSlots[slotIndex];
+        const int padIndex = slot.padIndex;
+        if (padIndex < 0 || padIndex >= GAMEPADS_MAX)
             continue;
+        PadState* pad = &padsState[padIndex];
+        const HalfJoyConSide side = static_cast<HalfJoyConSide>(slot.side);
 
         refreshPadSixAxis(padIndex);
         const PadSixAxis& padSixAxis = m_pad_six_axis[padIndex];

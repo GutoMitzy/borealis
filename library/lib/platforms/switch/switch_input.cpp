@@ -331,6 +331,13 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
         }
     }
 
+    // In single Joy-Con mode the gamepad remap supplies axes, not Borealis navigation buttons.
+    // Convert the remapped horizontal stick to menu directions, preserving ordinary game input.
+    state->buttons[BUTTON_NAV_UP] |= state->axes[LEFT_Y] < -0.45f;
+    state->buttons[BUTTON_NAV_DOWN] |= state->axes[LEFT_Y] > 0.45f;
+    state->buttons[BUTTON_NAV_LEFT] |= state->axes[LEFT_X] < -0.45f;
+    state->buttons[BUTTON_NAV_RIGHT] |= state->axes[LEFT_X] > 0.45f;
+
     state->buttons[BUTTON_NAV_UP] |= getKeyboardKeyState(BRLS_KBD_KEY_UP);
     state->buttons[BUTTON_NAV_RIGHT] |= getKeyboardKeyState(BRLS_KBD_KEY_RIGHT);
     state->buttons[BUTTON_NAV_DOWN] |= getKeyboardKeyState(BRLS_KBD_KEY_DOWN);

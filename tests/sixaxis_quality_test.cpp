@@ -1,6 +1,7 @@
 #include <borealis/platforms/switch/sixaxis_quality.hpp>
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -53,6 +54,12 @@ int main()
     assert(right.process(gravity, motion, 501, false, corrected));
     assert(right.calibrationSamples == 0);
     assert(right.calibrationRequested);
+    assert(std::fabs(right.bias[0] - bias[0]) < 1e-5f);
+
+    right.calibrationStart =
+        std::chrono::steady_clock::now() - std::chrono::seconds(6);
+    assert(right.process(gravity, motion, 502, false, corrected));
+    assert(!right.calibrationRequested);
     assert(std::fabs(right.bias[0] - bias[0]) < 1e-5f);
 
     right.reset();

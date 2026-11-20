@@ -317,6 +317,33 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
     {
         ControllerState localState;
         updateControllerState(&localState, i);
+
+        PadState* physicalPad = nullptr;
+        int physicalIndex = -1;
+        HalfJoyConSide physicalSide = HalfJoyConSide::NONE;
+        if (resolveController(i, &physicalPad, &physicalIndex, &physicalSide)
+            && physicalPad && physicalSide != HalfJoyConSide::NONE)
+        {
+            padUpdate(physicalPad);
+            const u64 physicalButtons = padGetButtons(physicalPad);
+            const unsigned stickIndex = halfJoyConStickIndex(physicalSide);
+            const HidAnalogStickState stick = padGetStickPos(physicalPad, stickIndex);
+            localState.axes[LEFT_X] = std::clamp(static_cast<float>(stick.x) / 32767.0f, -1.0f, 1.0f);
+            localState.axes[LEFT_Y] = std::clamp(-static_cast<float>(stick.y) / 32767.0f, -1.0f, 1.0f);
+
+            localState.buttons[BUTTON_A] = physicalSide == HalfJoyConSide::LEFT
+                ? (physicalButtons & HidNpadButton_Down) != 0
+                : (physicalButtons & HidNpadButton_A) != 0;
+            localState.buttons[BUTTON_B] = physicalSide == HalfJoyConSide::LEFT
+                ? (physicalButtons & HidNpadButton_Right) != 0
+                : (physicalButtons & HidNpadButton_B) != 0;
+            localState.buttons[BUTTON_X] = physicalSide == HalfJoyConSide::LEFT
+                ? (physicalButtons & HidNpadButton_Up) != 0
+                : (physicalButtons & HidNpadButton_X) != 0;
+            localState.buttons[BUTTON_Y] = physicalSide == HalfJoyConSide::LEFT
+                ? (physicalButtons & HidNpadButton_Left) != 0
+                : (physicalButtons & HidNpadButton_Y) != 0;
+        }
         for (size_t j = 0; j < _BUTTON_MAX; j++)
             state->buttons[j] |= localState.buttons[j];
 

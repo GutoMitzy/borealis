@@ -9,17 +9,31 @@ namespace brls
 struct SixAxisQuality
 {
     float bias[3] = {};
+    float calibrationSum[3] = {};
     std::uint64_t lastSamplingNumber = 0;
-    unsigned stationarySamples = 0;
+    unsigned calibrationSamples = 0;
     bool hasSamplingNumber = false;
+    bool calibrationRequested = false;
 
     void reset()
     {
-        for (float& component : bias)
-            component = 0.0f;
+        for (int i = 0; i < 3; ++i)
+        {
+            bias[i] = 0.0f;
+            calibrationSum[i] = 0.0f;
+        }
         lastSamplingNumber = 0;
-        stationarySamples = 0;
+        calibrationSamples = 0;
+        calibrationRequested = false;
         hasSamplingNumber = false;
+    }
+
+    void beginCalibration()
+    {
+        calibrationRequested = true;
+        calibrationSamples = 0;
+        for (float& sum : calibrationSum)
+            sum = 0.0f;
     }
 
     bool process(const float accel[3], const float gyro[3],
@@ -45,18 +59,31 @@ struct SixAxisQuality
         hasSamplingNumber = true;
         lastSamplingNumber = samplingNumber;
 
-        if (atRest && angularSq < 0.04f)
+        if (calibrationRequested)
         {
-            const float alpha = stationarySamples < 8 ? 0.2f : 0.025f;
-            for (int i = 0; i < 3; ++i)
-                bias[i] = std::clamp(bias[i] +
-                    alpha * (gyro[i] - bias[i]), -0.15f, 0.15f);
-            stationarySamples = std::min(stationarySamples + 1, 1000000U);
+            if (atRest && angularSq < 0.04f)
+            {
+                for (int i = 0; i < 3; ++i)
+                    calibrationSum[i] += gyro[i];
+
+                if (++calibrationSamples >= 40)
+                {
+                    for (int i = 0; i < 3; ++i)
+                        bias[i] = std::clamp(calibrationSum[i] /
+                            static_cast<float>(calibrationSamples), -0.15f, 0.15f);
+                    calibrationRequested = false;
+                }
+            }
+            else
+            {
+                calibrationSamples = 0;
+                for (float& sum : calibrationSum)
+                    sum = 0.0f;
+            }
         }
 
         for (int i = 0; i < 3; ++i)
-            corrected[i] = atRest ? 0.0f
-                : gyro[i] - (stationarySamples >= 8 ? bias[i] : 0.0f);
+            corrected[i] = gyro[i] - bias[i];
 
         return true;
     }

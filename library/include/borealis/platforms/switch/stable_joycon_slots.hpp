@@ -72,6 +72,21 @@ std::vector<StableJoyConSlot> stableJoyConSlots(
                 }
                 result.push_back({leftPad, 1});
                 result.push_back({rightPad, 2});
+
+                // Each JoyDual HID pad represents two independent logical Joy-Cons.
+                // A second JoyDual in the same two-pad group must not be discarded.
+                for (std::size_t i = first; i < last; ++i)
+                {
+                    const auto& pad = pads[i];
+                    if (!pad.present || !pad.dual || !pad.left || !pad.right)
+                        continue;
+                    if (static_cast<int>(i) != leftPad &&
+                        static_cast<int>(i) != rightPad)
+                    {
+                        result.push_back({static_cast<int>(i), 1});
+                        result.push_back({static_cast<int>(i), 2});
+                    }
+                }
             }
             if (result.size() > N)
                 result.resize(N);

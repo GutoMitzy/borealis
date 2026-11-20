@@ -65,7 +65,7 @@ inline HalfJoyConMapping defaultHalfJoyConMapping(HalfJoyConSide side)
     const int trigger = side == HalfJoyConSide::LEFT ? BUTTON_LT : BUTTON_RT;
     return { BUTTON_X, BUTTON_A, BUTTON_B, BUTTON_Y, BUTTON_LSB, shoulder, trigger,
         side == HalfJoyConSide::LEFT ? BUTTON_BACK : BUTTON_START,
-        side == HalfJoyConSide::LEFT ? BUTTON_START : BUTTON_BACK,
+        side == HalfJoyConSide::LEFT ? BUTTON_START : BUTTON_GUIDE,
         shoulder, trigger, HALF_JOYCON_UNMAPPED };
 }
 

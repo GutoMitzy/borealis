@@ -1282,7 +1282,8 @@ void SwitchInputManager::handleControllerSensors()
             HalfJoyConSide sensorSide = side;
             if (joyDual && side == HalfJoyConSide::NONE)
                 sensorSide = sensor == 0 ? HalfJoyConSide::LEFT : HalfJoyConSide::RIGHT;
-            if (!m_dsuMotionEnabled || sensorSide == HalfJoyConSide::NONE)
+            if (!m_dsuMotionEnabled || sensorSide == HalfJoyConSide::NONE
+                || !SwitchDsuMotionServer::instance().hasSubscribers())
                 fire(controllerIndex, sixaxis, sensorSide);
         }
     }
@@ -1627,6 +1628,33 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
     refreshHalfJoyConClaims();
 }
 
+int SwitchInputManager::getDsuMotionSubscribers() const
+{
+    return SwitchDsuMotionServer::instance().subscribers();
+}
+
+bool SwitchInputManager::isDsuMotionSensorPresent(HalfJoyConSide side) const
+{
+    const int slot = side == HalfJoyConSide::LEFT ? 0
+        : (side == HalfJoyConSide::RIGHT ? 1 : -1);
+    return SwitchDsuMotionServer::instance().sensorPresent(slot);
+}
+
+uint32_t SwitchInputManager::getDsuReceivedRequests() const
+{
+    return SwitchDsuMotionServer::instance().receivedRequests();
+}
+
+uint32_t SwitchInputManager::getDsuSentPackets() const
+{
+    return SwitchDsuMotionServer::instance().sentPackets();
+}
+
+int SwitchInputManager::getDsuLastError() const
+{
+    return SwitchDsuMotionServer::instance().lastError();
+}
+
 bool SwitchInputManager::setDsuMotionEnabled(bool enabled)
 {
     if (!enabled)
@@ -1637,7 +1665,8 @@ bool SwitchInputManager::setDsuMotionEnabled(bool enabled)
     }
     if (!SwitchDsuMotionServer::instance().start())
     {
-        Logger::warning("JOYCON_DSU: failed to bind UDP port 26760");
+        Logger::warning("JOYCON_DSU: failed to bind UDP port 26760 errno={}",
+            SwitchDsuMotionServer::instance().lastError());
         m_dsuMotionEnabled = false;
         return false;
     }

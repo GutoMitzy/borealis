@@ -28,6 +28,7 @@ public:
     {
         if (m_socket >= 0)
             return true;
+        m_lastError = 0;
         m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (m_socket < 0 && !m_socketServiceReady)
         {
@@ -37,13 +38,17 @@ public:
             m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         }
         if (m_socket < 0)
+        {
+            m_lastError = errno;
             return false;
+        }
         sockaddr_in local = {};
         local.sin_family = AF_INET;
         local.sin_port = htons(26760);
         local.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(m_socket, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0)
         {
+            m_lastError = errno;
             close(m_socket);
             m_socket = -1;
             return false;
@@ -51,6 +56,7 @@ public:
         const int flags = fcntl(m_socket, F_GETFL, 0);
         if (flags < 0 || fcntl(m_socket, F_SETFL, flags | O_NONBLOCK) < 0)
         {
+            m_lastError = errno;
             close(m_socket);
             m_socket = -1;
             return false;
@@ -65,9 +71,31 @@ public:
         m_socket = -1;
         for (auto& client : m_clients)
             client.active = false;
+        m_present.fill(false);
     }
 
     bool active() const { return m_socket >= 0; }
+
+    int subscribers() const
+    {
+        int count = 0;
+        for (const auto& client : m_clients)
+            if (client.active && Clock::now() - client.lastSeen <= std::chrono::seconds(5))
+                count++;
+        return count;
+    }
+
+    bool hasSubscribers() const { return subscribers() > 0; }
+
+    bool sensorPresent(int slot) const
+    {
+        return slot >= 0 && slot < 2 && m_present[slot]
+            && Clock::now() - m_seen[slot] < std::chrono::seconds(1);
+    }
+
+    uint32_t sentPackets() const { return m_sentPackets; }
+    uint32_t receivedRequests() const { return m_receivedRequests; }
+    int lastError() const { return m_lastError; }
 
     void poll()
     {
@@ -89,6 +117,7 @@ public:
             write32(packet + 8, 0);
             if (crc32(packet, static_cast<size_t>(count)) != expected)
                 continue;
+            ++m_receivedRequests;
 
             const uint32_t type = read32(packet + 16);
             if (type == 0x100000)
@@ -198,6 +227,9 @@ private:
     };
     int m_socket = -1;
     bool m_socketServiceReady = false;
+    int m_lastError = 0;
+    uint32_t m_receivedRequests = 0;
+    uint32_t m_sentPackets = 0;
     std::array<Client, 8> m_clients = {};
     std::array<uint32_t, 2> m_sequence = {};
     std::array<bool, 2> m_present = {};
@@ -286,7 +318,11 @@ private:
         write32(packet + 12, 0x4d4c5357U);
         write32(packet + 16, type);
         write32(packet + 8, crc32(packet, size));
-        sendto(m_socket, packet, size, 0, reinterpret_cast<const sockaddr*>(&remote), sizeof(remote));
+        if (sendto(m_socket, packet, size, 0, reinterpret_cast<const sockaddr*>(&remote),
+                   sizeof(remote)) == static_cast<ssize_t>(size))
+            ++m_sentPackets;
+        else
+            m_lastError = errno;
     }
 };
 }

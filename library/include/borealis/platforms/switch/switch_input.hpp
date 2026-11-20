@@ -81,6 +81,11 @@ class SwitchInputManager : public InputManager
     bool calibrateJoyConsOnFlatSurface();
     bool setDsuMotionEnabled(bool enabled);
     bool isDsuMotionEnabled() const { return m_dsuMotionEnabled; }
+    int getDsuMotionSubscribers() const;
+    bool isDsuMotionSensorPresent(HalfJoyConSide side) const;
+    uint32_t getDsuReceivedRequests() const;
+    uint32_t getDsuSentPackets() const;
+    int getDsuLastError() const;
     MotionCalibration getMotionCalibration(HalfJoyConSide side) const;
     void setMotionCalibration(HalfJoyConSide side, const MotionCalibration& calibration);
     bool isHalfJoyConMappingActive(int controller) const;

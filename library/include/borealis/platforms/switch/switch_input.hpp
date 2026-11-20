@@ -73,6 +73,7 @@ class SwitchInputManager : public InputManager
     void setJoyConInputMode(JoyConInputMode mode);
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     int getPreferredRightJoyConController();
+    int getPreferredGyroMouseController();
     void requestSixAxisManualCalibration();
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;

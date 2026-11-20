@@ -56,6 +56,63 @@ int main()
     assert((slots[0] == StableJoyConSlot{0, 2}));
 
     pads = {};
+    pads[0] = {true, false, false, true};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 2);
+    assert((slots[0] == StableJoyConSlot{-1, 1}));
+    assert((slots[1] == StableJoyConSlot{0, 2}));
+
+    pads[1] = {true, false, true, false};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 2);
+    assert((slots[0] == StableJoyConSlot{1, 1}));
+    assert((slots[1] == StableJoyConSlot{0, 2}));
+
+    pads[1] = {};
+    slots = stableJoyConSlots(pads, false, true);
+    assert((slots[0] == StableJoyConSlot{-1, 1}));
+    assert((slots[1] == StableJoyConSlot{0, 2}));
+
+    pads[0] = {};
+    pads[1] = {true, false, true, false};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 2);
+    assert((slots[0] == StableJoyConSlot{1, 1}));
+    assert((slots[1] == StableJoyConSlot{-1, 2}));
+
+    pads = {};
+    pads[2] = {true, false, false, true};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 4);
+    assert((slots[0] == StableJoyConSlot{-1, 1}));
+    assert((slots[1] == StableJoyConSlot{-1, 2}));
+    assert((slots[2] == StableJoyConSlot{-1, 1}));
+    assert((slots[3] == StableJoyConSlot{2, 2}));
+
+    pads[3] = {true, false, true, false};
+    slots = stableJoyConSlots(pads, false, true);
+    assert((slots[2] == StableJoyConSlot{3, 1}));
+    assert((slots[3] == StableJoyConSlot{2, 2}));
+
+    pads = {};
+    pads[0] = {true, true, true, true};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 2);
+    assert((slots[0] == StableJoyConSlot{0, 1}));
+    assert((slots[1] == StableJoyConSlot{0, 2}));
+    slots = stableJoyConSlots(pads, true, true);
+    assert(slots.size() == 1);
+    assert((slots[0] == StableJoyConSlot{0, 0}));
+
+    pads = {};
+    pads[0] = {true, false, false, false};
+    pads[1] = {true, false, false, true};
+    slots = stableJoyConSlots(pads, false, true);
+    assert(slots.size() == 2);
+    assert((slots[0] == StableJoyConSlot{0, 0}));
+    assert((slots[1] == StableJoyConSlot{1, 2}));
+
+    pads = {};
     pads[0] = {true, false, false, false};
     pads[1] = {true, false, false, true};
     slots = stableJoyConSlots(pads, false);

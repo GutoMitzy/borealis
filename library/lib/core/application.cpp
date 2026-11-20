@@ -738,7 +738,6 @@ bool Application::handleAction(const ActionType type, const int button, const bo
         return false;
 
     View* hintParent = Application::currentFocus;
-    std::set<int> consumedButtons;
 
     if (!hintParent)
         hintParent = Application::activitiesStack[Application::activitiesStack.size() - 1]->getContentView();
@@ -749,9 +748,6 @@ bool Application::handleAction(const ActionType type, const int button, const bo
         for (const auto& action : actions)
         {
             if (!action || action->getType() != type || action->getButton() != button)
-                continue;
-
-            if (consumedButtons.find(button) != consumedButtons.end())
                 continue;
 
             if (action->isAvailable() && (!repeating || action->isAllowRepeating()))

@@ -26,6 +26,7 @@
 #include <borealis/core/input.hpp>
 #include <borealis/platforms/switch/switch_mouse.hpp>
 #include <borealis/platforms/switch/switch_half_joycon.hpp>
+#include <borealis/platforms/switch/sixaxis_quality.hpp>
 
 #define TOUCHES_MAX 10
 
@@ -174,11 +175,13 @@ class SwitchInputManager : public InputManager
     struct PadSixAxis
     {
         HidSixAxisSensorHandle handles[2];
+        SixAxisQuality quality[2];
         int count;
         u32 style;
     };
     HidSixAxisSensorHandle m_six_axis_sensor_handle_handheld;
     bool m_six_axis_sensor_handheld_active = false;
+    SixAxisQuality m_handheld_sixaxis_quality;
     PadSixAxis m_pad_six_axis[GAMEPADS_MAX];
 
     std::vector<bool> m_hid_keyboard_state;

@@ -405,115 +405,74 @@ int SwitchInputManager::getPreferredRightJoyConController()
     return -1;
 }
 
-short SwitchInputManager::getControllersConnectedCount()
+std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
 {
-    padUpdate(&this->padStateHandheld);
-    int controllers = padStateHandheld.active_handheld ? 1 : 0;
-
-    for (int i = 0; i < GAMEPADS_MAX && controllers < GAMEPADS_MAX; i++)
+    std::array<StableJoyConPad, GAMEPADS_MAX> padPresence = {};
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
     {
-        padUpdate(&this->padsState[i]);
-        if (padsState[i].style_set == 0)
+        padUpdate(&padsState[i]);
+        const u32 style = padsState[i].style_set;
+        if (style == 0)
             continue;
 
-        if (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual)
+        if ((style & HidNpadStyleTag_NpadJoyDual) != 0)
         {
-            const u64 attrib = padGetAttributes(&padsState[i]);
-            const u32 connectedSides = joyDualConnectedSideMask(i, attrib);
-            const bool leftConnected = (connectedSides & 1U) != 0;
-            const bool rightConnected = (connectedSides & 2U) != 0;
-
-            if (joyConInputMode == JoyConInputMode::PAIRED && leftConnected && rightConnected)
-                controllers++;
-            else
-                controllers += (leftConnected ? 1 : 0) + (rightConnected ? 1 : 0);
+            const u32 mask = joyDualConnectedSideMask(i, padGetAttributes(&padsState[i]));
+            if (mask == 0)
+                continue;
+            padPresence[i] = { true, true, (mask & 1U) != 0, (mask & 2U) != 0 };
         }
         else
-            controllers++;
+        {
+            const HalfJoyConSide physicalSide = halfJoyConSide(style);
+            padPresence[i] = { true, false,
+                physicalSide == HalfJoyConSide::LEFT,
+                physicalSide == HalfJoyConSide::RIGHT };
+        }
     }
-
-    return controllers > GAMEPADS_MAX ? GAMEPADS_MAX : controllers;
+    return stableJoyConSlots(padPresence, joyConInputMode == JoyConInputMode::PAIRED);
 }
 
-bool SwitchInputManager::resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
+short SwitchInputManager::getControllersConnectedCount()
 {
-    if (controller < 0)
+    padUpdate(&padStateHandheld);
+    const int handheldCount = padStateHandheld.active_handheld ? 1 : 0;
+    const int total = handheldCount +
+        static_cast<int>(collectStableJoyConSlots().size());
+    return static_cast<short>(std::min(total, GAMEPADS_MAX));
+}
+
+bool SwitchInputManager::resolveController(
+    int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
+{
+    if (controller < 0 || controller >= GAMEPADS_MAX)
         return false;
 
     padUpdate(&padStateHandheld);
-    int logicalIndex = 0;
     if (padStateHandheld.active_handheld)
     {
-        if (controller == logicalIndex)
+        if (controller == 0)
         {
             *pad = &padStateHandheld;
             *padIndex = -1;
             *side = HalfJoyConSide::NONE;
             return true;
         }
-        logicalIndex++;
+        --controller;
     }
 
-    for (int i = 0; i < GAMEPADS_MAX && logicalIndex < GAMEPADS_MAX; ++i)
-    {
-        padUpdate(&padsState[i]);
-        if (padsState[i].style_set == 0)
-            continue;
+    const auto logicalSlots = collectStableJoyConSlots();
+    if (controller >= static_cast<int>(logicalSlots.size()))
+        return false;
 
-        const bool joyDual = (padsState[i].style_set & HidNpadStyleTag_NpadJoyDual) != 0;
-        if (joyDual)
-        {
-            const u64 attrib = padGetAttributes(&padsState[i]);
-            const u32 sides = joyDualConnectedSideMask(i, attrib);
-            const bool left = (sides & 1U) != 0;
-            const bool right = (sides & 2U) != 0;
-            if (joyConInputMode == JoyConInputMode::PAIRED && left && right)
-            {
-                if (controller == logicalIndex)
-                {
-                    *pad = &padsState[i];
-                    *padIndex = i;
-                    *side = HalfJoyConSide::NONE;
-                    return true;
-                }
-                ++logicalIndex;
-                continue;
-            }
-            if (left)
-            {
-                if (controller == logicalIndex)
-                {
-                    *pad = &padsState[i];
-                    *padIndex = i;
-                    *side = HalfJoyConSide::LEFT;
-                    return true;
-                }
-                ++logicalIndex;
-            }
-            if (right)
-            {
-                if (controller == logicalIndex)
-                {
-                    *pad = &padsState[i];
-                    *padIndex = i;
-                    *side = HalfJoyConSide::RIGHT;
-                    return true;
-                }
-                ++logicalIndex;
-            }
-            continue;
-        }
+    const auto& slot = logicalSlots[controller];
+    if (slot.padIndex < 0 || slot.padIndex >= GAMEPADS_MAX)
+        return false;
 
-        if (controller == logicalIndex)
-        {
-            *pad = &padsState[i];
-            *padIndex = i;
-            *side = halfJoyConSide(padsState[i].style_set);
-            return true;
-        }
-        ++logicalIndex;
-    }
-    return false;
+    *pad = &padsState[slot.padIndex];
+    *padIndex = slot.padIndex;
+    *side = static_cast<HalfJoyConSide>(slot.side);
+    return true;
 }
 
 void SwitchInputManager::updateControllerState(ControllerState* state, int controller)

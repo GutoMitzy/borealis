@@ -71,6 +71,35 @@ int main()
     assert(!right.calibrationRequested);
     assert(std::fabs(right.bias[0] - bias[0]) < 1e-5f);
 
+    // Independent biases on four Joy-Cons must not leak between players.
+    brls::SixAxisQuality pads[4];
+    const float offsets[4][3] = {
+        {0.014f, -0.011f, 0.007f},
+        {-0.019f, 0.008f, -0.006f},
+        {0.009f, 0.012f, -0.010f},
+        {-0.015f, -0.007f, 0.013f}
+    };
+    for (int controller = 0; controller < 4; ++controller)
+    {
+        for (std::uint64_t sample = 1; sample <= 40; ++sample)
+            assert(pads[controller].process(gravity, offsets[controller],
+                                            sample, true, corrected));
+        for (std::uint64_t sample = 41; sample <= 140; ++sample)
+        {
+            const float intended[3] = {
+                0.25f + static_cast<float>(controller) * 0.10f,
+                -0.20f, 0.13f
+            };
+            float measured[3];
+            for (int axis = 0; axis < 3; ++axis)
+                measured[axis] = intended[axis] + offsets[controller][axis];
+            assert(pads[controller].process(gravity, measured, sample,
+                                            false, corrected));
+            for (int axis = 0; axis < 3; ++axis)
+                assert(std::fabs(corrected[axis] - intended[axis]) < 0.002f);
+        }
+    }
+
     right.reset();
     assert(right.bias[0] == 0.0f);
     assert(!right.calibrationRequested);

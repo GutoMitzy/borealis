@@ -1113,6 +1113,8 @@ void SwitchInputManager::handleControllerSensors()
             static_cast<uint32_t>(sixaxis.sampling_number) };
         auto gyroState = SensorEvent{ index, SensorEventType::GYRO, { 0, 0, 0 },
             static_cast<uint32_t>(sixaxis.sampling_number) };
+        accelState.atRest = atRest;
+        gyroState.atRest = atRest;
         for (int k = 0; k < 3; ++k)
         {
             accelState.data[k] = remappedAccel[k];

@@ -745,28 +745,24 @@ bool Application::handleAction(const ActionType type, const int button, const bo
 
     while (hintParent)
     {
-        for (auto& action : hintParent->getActions())
+        const auto actions = hintParent->getActions();
+        for (const auto& action : actions)
         {
-            if (action->getType() != type)
+            if (!action || action->getType() != type || action->getButton() != button)
                 continue;
 
-            if (action->getButton() != button)
-                continue;
-
-            if (consumedButtons.find(action->getButton()) != consumedButtons.end())
+            if (consumedButtons.find(button) != consumedButtons.end())
                 continue;
 
             if (action->isAvailable() && (!repeating || action->isAllowRepeating()))
             {
-                if (action->getActionListener()(hintParent))
+                const auto listener = action->getActionListener();
+                const auto sound = action->getSound();
+                if (listener(hintParent))
                 {
                     setInputType(InputType::GAMEPAD);
-                    if (type == ACTION_GAMEPAD && button == BUTTON_A)
-                        hintParent->playClickAnimation();
-
-                    getAudioPlayer()->play(action->getSound());
-
-                    consumedButtons.insert(action->getButton());
+                    getAudioPlayer()->play(sound);
+                    return true;
                 }
             }
         }
@@ -774,7 +770,7 @@ bool Application::handleAction(const ActionType type, const int button, const bo
         hintParent = hintParent->getParent();
     }
 
-    return !consumedButtons.empty();
+    return false;
 }
 
 void Application::frame()

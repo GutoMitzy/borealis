@@ -421,6 +421,14 @@ bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
     return true;
 }
 
+int SwitchInputManager::getPreferredGyroMouseController()
+{
+    padUpdate(&padStateHandheld);
+    if (padStateHandheld.active_handheld)
+        return 0;
+    return getPreferredRightJoyConController();
+}
+
 int SwitchInputManager::getPreferredRightJoyConController()
 {
     const int count = getControllersConnectedCount();

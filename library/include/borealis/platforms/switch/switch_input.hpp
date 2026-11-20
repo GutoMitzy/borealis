@@ -79,6 +79,8 @@ class SwitchInputManager : public InputManager
         float gravityReference[3] = { 0.0f, 0.0f, 1.0f };
     };
     bool calibrateJoyConsOnFlatSurface();
+    bool setDsuMotionEnabled(bool enabled);
+    bool isDsuMotionEnabled() const { return m_dsuMotionEnabled; }
     MotionCalibration getMotionCalibration(HalfJoyConSide side) const;
     void setMotionCalibration(HalfJoyConSide side, const MotionCalibration& calibration);
     bool isHalfJoyConMappingActive(int controller) const;
@@ -137,6 +139,7 @@ class SwitchInputManager : public InputManager
     void applyHalfMapping(ControllerState* state, PadState* pad, u64 buttons);
     JoyConInputMode joyConInputMode = JoyConInputMode::SEPARATE;
     JoyConPairGyroMode joyConPairGyroMode = JoyConPairGyroMode::RIGHT;
+    bool m_dsuMotionEnabled = false;
     bool joyConInputModeInitialized = false;
     std::array<HalfJoyConMapping, 2> halfMappings = {
         defaultHalfJoyConMapping(HalfJoyConSide::LEFT), defaultHalfJoyConMapping(HalfJoyConSide::RIGHT)

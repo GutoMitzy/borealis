@@ -18,6 +18,7 @@
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
+#include <borealis/platforms/switch/motion_trace_csv.hpp>
 #include <cstdarg>
 #include <cstdio>
 #ifdef __SWITCH2__
@@ -1034,8 +1035,13 @@ void SwitchInputManager::handleControllerSensors()
     int controllerIndex = 0;
     static unsigned debugFrame = 0;
     const bool debugTick       = (debugFrame++ % 60) == 0;
+    static MotionTraceCsv motionTrace(
+        "sdmc:/switch/Moonlight-Switch/motion_trace.enable",
+        "sdmc:/switch/Moonlight-Switch/motion_hid.csv",
+        "t_us,controller,pad,side,handle,sample,dt_ns,rest,accepted,raw_ax_g,raw_ay_g,raw_az_g,raw_wx,raw_wy,raw_wz,angle_x,angle_y,angle_z,dir00,dir01,dir02,dir10,dir11,dir12,dir20,dir21,dir22,accel_x_mss,accel_y_mss,accel_z_mss,gyro_x_rads,gyro_y_rads,gyro_z_rads,bias_x,bias_y,bias_z", 120000);
 
-    auto fire = [&](int index, const HidSixAxisSensorState& sixaxis,
+    auto fire = [&](int index, int padIndex, int sensorIndex,
+                    const HidSixAxisSensorState& sixaxis,
                     HalfJoyConSide side, bool atRest, SixAxisQuality& quality)
     {
         const float accel[3] = {
@@ -1057,8 +1063,48 @@ void SwitchInputManager::handleControllerSensors()
             remappedGyro[k] = gyro[remap.axis[k]] * remap.sign[k];
         }
         float correctedGyro[3] = {};
-        if (!quality.process(remappedAccel, remappedGyro,
-                             sixaxis.sampling_number, atRest, correctedGyro))
+        const bool accepted = quality.process(remappedAccel, remappedGyro,
+                                              sixaxis.sampling_number, atRest,
+                                              correctedGyro);
+        if (motionTrace.enabled())
+            motionTrace.write("%llu,%d,%d,%d,%d,%llu,%llu,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
+                static_cast<unsigned long long>(motionTraceMicros()),
+                index,
+                padIndex,
+                static_cast<int>(side),
+                sensorIndex,
+                static_cast<unsigned long long>(sixaxis.sampling_number),
+                static_cast<unsigned long long>(sixaxis.delta_time),
+                atRest ? 1 : 0,
+                accepted ? 1 : 0,
+                sixaxis.acceleration.x,
+                sixaxis.acceleration.y,
+                sixaxis.acceleration.z,
+                sixaxis.angular_velocity.x,
+                sixaxis.angular_velocity.y,
+                sixaxis.angular_velocity.z,
+                sixaxis.angle.x,
+                sixaxis.angle.y,
+                sixaxis.angle.z,
+                sixaxis.direction.direction[0][0],
+                sixaxis.direction.direction[0][1],
+                sixaxis.direction.direction[0][2],
+                sixaxis.direction.direction[1][0],
+                sixaxis.direction.direction[1][1],
+                sixaxis.direction.direction[1][2],
+                sixaxis.direction.direction[2][0],
+                sixaxis.direction.direction[2][1],
+                sixaxis.direction.direction[2][2],
+                remappedAccel[0],
+                remappedAccel[1],
+                remappedAccel[2],
+                correctedGyro[0],
+                correctedGyro[1],
+                correctedGyro[2],
+                quality.bias[0],
+                quality.bias[1],
+                quality.bias[2]);
+        if (!accepted)
             return;
 
         auto accelState = SensorEvent{ index, SensorEventType::ACCEL, { 0, 0, 0 },
@@ -1091,7 +1137,7 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
-            fire(controllerIndex, sixaxis, HalfJoyConSide::NONE,
+            fire(controllerIndex, -1, 0, sixaxis, HalfJoyConSide::NONE,
                  R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
         }
         else if (debugTick)
@@ -1130,7 +1176,7 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(padSixAxis.handles[sensor], &atRest);
-            fire(controllerIndex, sixaxis, side,
+            fire(controllerIndex, padIndex, sensor, sixaxis, side,
                  R_SUCCEEDED(restResult) && atRest,
                  m_pad_six_axis[padIndex].quality[sensor]);
         }

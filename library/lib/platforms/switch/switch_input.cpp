@@ -598,6 +598,12 @@ void SwitchInputManager::updateControllerStateInner(ControllerState* state, PadS
             ? halfMappings[sideIndex]
             : defaultHalfJoyConMapping(logicalSide);
         applyHalfJoyConMapping(state, mapping, logicalSide, keysDown, systemPressed, chatPressed);
+        if (logicalSide == HalfJoyConSide::RIGHT && systemPressed &&
+            m_homeButtonMode == ButtonOverrideMode::NONE)
+        {
+            state->buttons[BUTTON_GUIDE] = true;
+            state->buttons[BUTTON_BACK] = false;
+        }
         if (logicalSide == HalfJoyConSide::LEFT && m_screenshotButtonMode == ButtonOverrideMode::GUIDE_BUTTON)
             state->buttons[BUTTON_GUIDE] = isScreenshotButtonPressed();
         if (logicalSide == HalfJoyConSide::RIGHT && m_homeButtonMode == ButtonOverrideMode::GUIDE_BUTTON)

@@ -214,9 +214,27 @@ void SwitchVideoContext::resetFramebuffer()
 
 void SwitchVideoContext::beginFrame()
 {
-    // Poll the display resolution change event
-    if (this->displayResolutionChangeEventReady && R_SUCCEEDED(eventWait(&this->defaultDisplayResolutionChangeEvent, 0)))
+    const bool resolutionEvent = this->displayResolutionChangeEventReady &&
+        R_SUCCEEDED(eventWait(&this->defaultDisplayResolutionChangeEvent, 0));
+
+    int32_t displayWidth = 0;
+    int32_t displayHeight = 0;
+    const bool validDisplayResolution =
+        R_SUCCEEDED(appletGetDefaultDisplayResolution(&displayWidth, &displayHeight)) &&
+        displayWidth > 0 && displayHeight > 0;
+
+    const bool dimensionsChanged = validDisplayResolution &&
+        (static_cast<int32_t>(this->framebufferWidth) != displayWidth ||
+         static_cast<int32_t>(this->framebufferHeight) != displayHeight);
+
+    if (dimensionsChanged) {
+        Logger::info("switch: display size changed from {}x{} to {}x{}",
+                     this->framebufferWidth, this->framebufferHeight,
+                     displayWidth, displayHeight);
         this->resetFramebuffer();
+    } else if (resolutionEvent && !validDisplayResolution) {
+        this->resetFramebuffer();
+    }
 
     this->imageSlot = this->queue.acquireImage(this->swapchain);
 

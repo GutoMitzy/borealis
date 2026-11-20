@@ -431,7 +431,9 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
                 physicalSide == HalfJoyConSide::RIGHT };
         }
     }
-    return stableJoyConSlots(padPresence, joyConInputMode == JoyConInputMode::PAIRED);
+    return stableJoyConSlots(padPresence,
+        joyConInputMode == JoyConInputMode::PAIRED,
+        joyConInputMode == JoyConInputMode::SEPARATE);
 }
 
 short SwitchInputManager::getControllersConnectedCount()

@@ -74,6 +74,7 @@ class SwitchInputManager : public InputManager
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     int getPreferredRightJoyConController();
     void requestSixAxisManualCalibration();
+    bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }

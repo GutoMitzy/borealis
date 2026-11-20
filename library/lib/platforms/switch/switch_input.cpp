@@ -988,6 +988,8 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
     for (int i = 0; i < sixAxis.count; i++)
         hidStopSixAxisSensor(sixAxis.handles[i]);
     sixAxis.count = 0;
+    for (auto& quality : sixAxis.quality)
+        quality.reset();
     sixAxis.style = style;
 
     HidNpadStyleTag tag = HidNpadStyleTag_NpadFullKey;
@@ -1059,21 +1061,48 @@ void SwitchInputManager::handleControllerSensors()
     static unsigned debugFrame = 0;
     const bool debugTick       = (debugFrame++ % 60) == 0;
 
-    auto fire = [&](int index, const HidSixAxisSensorState& sixaxis, HalfJoyConSide side, bool atRest)
+    auto fire = [&](int index, const HidSixAxisSensorState& sixaxis,
+                    HalfJoyConSide side, bool atRest, SixAxisQuality& quality)
     {
-        const float accel[3] = { -sixaxis.acceleration.x * 9.80665f, -sixaxis.acceleration.z * 9.80665f, sixaxis.acceleration.y * 9.80665f };
-        const float gyro[3]  = { static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
-             static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
-             static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI) };
+        const float accel[3] = {
+            -sixaxis.acceleration.x * 9.80665f,
+            -sixaxis.acceleration.z * 9.80665f,
+            sixaxis.acceleration.y * 9.80665f
+        };
+        const float gyro[3] = {
+            static_cast<float>(sixaxis.angular_velocity.x * 2.0f * M_PI),
+            static_cast<float>(sixaxis.angular_velocity.z * 2.0f * M_PI),
+            static_cast<float>(-sixaxis.angular_velocity.y * 2.0f * M_PI)
+        };
         const SixAxisRemap& remap = sixAxisRemapFor(side);
-
-        auto accelState = SensorEvent{ index, SensorEventType::ACCEL, { 0, 0, 0 }, 0 };
-        auto gyroState  = SensorEvent{ index, SensorEventType::GYRO, { 0, 0, 0 }, 0 };
-        for (int k = 0; k < 3; k++)
+        float remappedAccel[3] = {};
+        float remappedGyro[3] = {};
+        for (int k = 0; k < 3; ++k)
         {
-            accelState.data[k] = accel[remap.axis[k]] * remap.sign[k];
-            gyroState.data[k]  = atRest ? 0.0f : gyro[remap.axis[k]] * remap.sign[k];
+            remappedAccel[k] = accel[remap.axis[k]] * remap.sign[k];
+            remappedGyro[k] = gyro[remap.axis[k]] * remap.sign[k];
         }
+        float correctedGyro[3] = {};
+        if (!quality.process(remappedAccel, remappedGyro,
+                             sixaxis.sampling_number, atRest, correctedGyro))
+            return;
+
+        auto accelState = SensorEvent{ index, SensorEventType::ACCEL, { 0, 0, 0 },
+            static_cast<uint32_t>(sixaxis.sampling_number) };
+        auto gyroState = SensorEvent{ index, SensorEventType::GYRO, { 0, 0, 0 },
+            static_cast<uint32_t>(sixaxis.sampling_number) };
+        for (int k = 0; k < 3; ++k)
+        {
+            accelState.data[k] = remappedAccel[k];
+            gyroState.data[k] = correctedGyro[k];
+        }
+        if (debugTick)
+            sixAxisDebug("QUALITY ctl=%d side=%d sample=%llu rest=%d stationary=%u bias=(%.5f %.5f %.5f) gyro=(%.3f %.3f %.3f)",
+                index, static_cast<int>(side),
+                static_cast<unsigned long long>(sixaxis.sampling_number),
+                static_cast<int>(atRest), quality.stationarySamples,
+                quality.bias[0], quality.bias[1], quality.bias[2],
+                correctedGyro[0], correctedGyro[1], correctedGyro[2]);
         getControllerSensorStateChanged()->fire(accelState);
         getControllerSensorStateChanged()->fire(gyroState);
     };
@@ -1088,7 +1117,8 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
-            fire(controllerIndex, sixaxis, HalfJoyConSide::NONE, R_SUCCEEDED(restResult) && atRest);
+            fire(controllerIndex, sixaxis, HalfJoyConSide::NONE,
+                 R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
         }
         else if (debugTick)
             sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
@@ -1126,7 +1156,9 @@ void SwitchInputManager::handleControllerSensors()
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(padSixAxis.handles[sensor], &atRest);
-            fire(controllerIndex, sixaxis, side, R_SUCCEEDED(restResult) && atRest);
+            fire(controllerIndex, sixaxis, side,
+                 R_SUCCEEDED(restResult) && atRest,
+                 m_pad_six_axis[padIndex].quality[sensor]);
         }
     }
     Application::setActiveEvent(true);

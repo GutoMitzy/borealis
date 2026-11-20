@@ -27,6 +27,7 @@
 #include <borealis/platforms/switch/switch_mouse.hpp>
 #include <borealis/platforms/switch/switch_half_joycon.hpp>
 #include <borealis/platforms/switch/sixaxis_quality.hpp>
+#include <borealis/platforms/switch/stable_joycon_slots.hpp>
 
 #define TOUCHES_MAX 10
 
@@ -196,6 +197,7 @@ class SwitchInputManager : public InputManager
     void refreshPadSixAxis(int pad);
     void upToDateMouseState();
     void hidInitializeKeyboardMap();
+    std::vector<StableJoyConSlot> collectStableJoyConSlots();
     bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side);
     void updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide side = HalfJoyConSide::NONE, int padIndex = -1);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],

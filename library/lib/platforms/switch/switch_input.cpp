@@ -382,6 +382,20 @@ void SwitchInputManager::updateUnifiedControllerState(ControllerState* state)
     }
 }
 
+int SwitchInputManager::getPreferredRightJoyConController()
+{
+    const int count = getControllersConnectedCount();
+    for (int i = 0; i < count; ++i)
+    {
+        PadState* pad = nullptr;
+        int padIndex = -1;
+        HalfJoyConSide side = HalfJoyConSide::NONE;
+        if (resolveController(i, &pad, &padIndex, &side) && side == HalfJoyConSide::RIGHT)
+            return i;
+    }
+    return -1;
+}
+
 short SwitchInputManager::getControllersConnectedCount()
 {
     padUpdate(&this->padStateHandheld);

@@ -11,6 +11,8 @@ struct SixAxisQuality
 {
     float bias[3] = {};
     float calibrationSum[3] = {};
+    float restSum[3] = {};
+    unsigned restSamples = 0;
     std::uint64_t lastSamplingNumber = 0;
     unsigned calibrationSamples = 0;
     bool hasSamplingNumber = false;
@@ -23,9 +25,11 @@ struct SixAxisQuality
         {
             bias[i] = 0.0f;
             calibrationSum[i] = 0.0f;
+            restSum[i] = 0.0f;
         }
         lastSamplingNumber = 0;
         calibrationSamples = 0;
+        restSamples = 0;
         calibrationRequested = false;
         calibrationStart = {};
         hasSamplingNumber = false;
@@ -92,6 +96,33 @@ struct SixAxisQuality
                 for (float& sum : calibrationSum)
                     sum = 0.0f;
             }
+        }
+
+        // Calibrate without changing intentional motion. Only HID-confirmed
+        // rest samples contribute; a short movement resets the candidate.
+        if (!calibrationRequested && atRest && angularSq < 0.04f)
+        {
+            for (int i = 0; i < 3; ++i)
+                restSum[i] += gyro[i];
+            if (++restSamples >= 40)
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    const float observed = std::clamp(
+                        restSum[i] / static_cast<float>(restSamples),
+                        -0.15f, 0.15f);
+                    bias[i] = bias[i] == 0.0f
+                        ? observed : bias[i] * 0.98f + observed * 0.02f;
+                    restSum[i] = 0.0f;
+                }
+                restSamples = 0;
+            }
+        }
+        else
+        {
+            restSamples = 0;
+            for (float& sum : restSum)
+                sum = 0.0f;
         }
 
         for (int i = 0; i < 3; ++i)

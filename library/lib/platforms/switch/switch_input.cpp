@@ -19,6 +19,7 @@
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
 #include <borealis/platforms/switch/motion_trace_csv.hpp>
+#include <borealis/platforms/switch/motion_sample_timing.hpp>
 #include <cstdarg>
 #include <cstdio>
 #ifdef __SWITCH2__
@@ -1063,6 +1064,7 @@ void SwitchInputManager::handleControllerSensors()
     padUpdate(&this->padStateHandheld);
     const bool handheld = padStateHandheld.active_handheld;
     int controllerIndex = 0;
+    constexpr std::size_t maxSamplesPerPoll = 8;
     static unsigned debugFrame = 0;
     const bool debugTick       = (debugFrame++ % 60) == 0;
     static MotionTraceCsv motionTrace(
@@ -1143,6 +1145,8 @@ void SwitchInputManager::handleControllerSensors()
             static_cast<uint32_t>(sixaxis.sampling_number) };
         accelState.atRest = atRest;
         gyroState.atRest = atRest;
+        accelState.sampleIntervalSeconds = motionSampleIntervalSeconds(sixaxis.delta_time);
+        gyroState.sampleIntervalSeconds = accelState.sampleIntervalSeconds;
         for (int k = 0; k < 3; ++k)
         {
             accelState.data[k] = remappedAccel[k];
@@ -1161,16 +1165,18 @@ void SwitchInputManager::handleControllerSensors()
 
     if (handheld)
     {
-        HidSixAxisSensorState sixaxis = { 0 };
+        HidSixAxisSensorState sixaxis[maxSamplesPerPoll] = {};
         const size_t samples = m_six_axis_sensor_handheld_active
-            ? hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld, &sixaxis, 1)
+            ? hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld,
+                                        sixaxis, maxSamplesPerPoll)
             : 0;
         if (samples > 0)
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
-            fire(controllerIndex, -1, 0, sixaxis, HalfJoyConSide::NONE,
-                 R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
+            for (size_t sample = samples; sample-- > 0;)
+                fire(controllerIndex, -1, 0, sixaxis[sample], HalfJoyConSide::NONE,
+                     R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
         }
         else if (debugTick)
             sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
@@ -1199,26 +1205,28 @@ void SwitchInputManager::handleControllerSensors()
         const bool joyDual = (pad->style_set & HidNpadStyleTag_NpadJoyDual) != 0;
         const int sensor = joyDual && side == HalfJoyConSide::LEFT ? 0 : (joyDual ? 1 : 0);
         const u64 attrib = padGetAttributes(pad);
-        HidSixAxisSensorState sixaxis = { 0 };
+        HidSixAxisSensorState sixaxis[maxSamplesPerPoll] = {};
         const size_t samples = sensor < padSixAxis.count
-            ? hidGetSixAxisSensorStates(padSixAxis.handles[sensor], &sixaxis, 1)
+            ? hidGetSixAxisSensorStates(padSixAxis.handles[sensor],
+                                        sixaxis, maxSamplesPerPoll)
             : 0;
 
         if (debugTick)
             sixAxisDebug("DATA ctl=%d pad=%d style=0x%x side=%d attrib=0x%llx handles=%d selected=%d samples=%zu "
                          "gyro=(%.3f %.3f %.3f) acc=(%.3f %.3f %.3f)",
                 controllerIndex, padIndex, pad->style_set, static_cast<int>(side), (unsigned long long)attrib,
-                padSixAxis.count, sensor, samples, sixaxis.angular_velocity.x, sixaxis.angular_velocity.y,
-                sixaxis.angular_velocity.z, sixaxis.acceleration.x, sixaxis.acceleration.y,
-                sixaxis.acceleration.z);
+                padSixAxis.count, sensor, samples, sixaxis[0].angular_velocity.x, sixaxis[0].angular_velocity.y,
+                sixaxis[0].angular_velocity.z, sixaxis[0].acceleration.x, sixaxis[0].acceleration.y,
+                sixaxis[0].acceleration.z);
 
         if (samples > 0)
         {
             bool atRest = false;
             const Result restResult = hidIsSixAxisSensorAtRest(padSixAxis.handles[sensor], &atRest);
-            fire(controllerIndex, padIndex, sensor, sixaxis, side,
-                 R_SUCCEEDED(restResult) && atRest,
-                 m_pad_six_axis[padIndex].quality[sensor]);
+            for (size_t sample = samples; sample-- > 0;)
+                fire(controllerIndex, padIndex, sensor, sixaxis[sample], side,
+                     R_SUCCEEDED(restResult) && atRest,
+                     m_pad_six_axis[padIndex].quality[sensor]);
         }
     }
     Application::setActiveEvent(true);

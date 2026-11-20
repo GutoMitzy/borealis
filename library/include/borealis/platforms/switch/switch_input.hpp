@@ -70,6 +70,7 @@ class SwitchInputManager : public InputManager
     void setHalfJoyConMappingEnabled(bool enabled);
     void setJoyConInputMode(JoyConInputMode mode);
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
+    int getPreferredRightJoyConController();
     bool isHalfJoyConMappingActive(int controller) const;
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }

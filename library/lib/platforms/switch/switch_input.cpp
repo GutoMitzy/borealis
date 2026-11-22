@@ -20,6 +20,7 @@
 #include <borealis/platforms/switch/switch_input.hpp>
 #include <borealis/platforms/switch/motion_trace_csv.hpp>
 #include <borealis/platforms/switch/motion_sample_timing.hpp>
+#include <borealis/platforms/switch/system_button_owner.hpp>
 #include <cstdarg>
 #include <cstdio>
 #ifdef __SWITCH2__
@@ -1681,15 +1682,8 @@ void SwitchInputManager::processSystemButtonEvent(::Event* event, int button)
         // Joy-Con generated the system event. Fall back only for the HOME
         // event with at least one eligible right Joy-Con, rather than losing
         // the key completely. Multiple Joy-Cons still prefer a valid owner.
-        if (button == 1 && owner < 0 && candidates)
-        {
-            for (int i = 0; i < GAMEPADS_MAX; ++i)
-                if (candidates & (1ULL << i))
-                {
-                    owner = i;
-                    break;
-                }
-        }
+        if (button == 1)
+            owner = resolveWirelessHomeOwner(owner, candidates, GAMEPADS_MAX);
         halfConsumed = halfMappingEnabled && owner >= 0 && owner < GAMEPADS_MAX
             && (halfSystemClaims[owner].load() & (1U << button));
         if (mode->load() != ButtonOverrideMode::NONE)

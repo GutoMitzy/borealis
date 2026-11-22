@@ -568,7 +568,10 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     for (int pad = 0; pad < GAMEPADS_MAX; ++pad)
     {
         if (!padPresence[pad].present)
+        {
+            sensorPhysicalIds[pad] = {};
             continue;
+        }
         HidsysUniquePadId physical[2] = {};
         s32 count = 0;
         const Result rc = hidsysGetUniquePadsFromNpad(
@@ -593,7 +596,21 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
             if ((side == 1 && !padPresence[pad].left) ||
                 (side == 2 && !padPresence[pad].right))
                 continue;
-            observations.push_back({stableJoyConHardwareId(physical[j]), pad, side});
+            const std::uint64_t physicalId = stableJoyConHardwareId(physical[j]);
+            const int sensorIndex = padPresence[pad].dual
+                ? (side == 1 ? 0 : 1) : 0;
+            // An Npad index can be reused by a different physical Joy-Con
+            // without a change in its style. Never reuse the previous
+            // controller's gyro bias or sample sequence in that case.
+            if (sensorPhysicalIds[pad][sensorIndex] != physicalId)
+            {
+                sensorPhysicalIds[pad][sensorIndex] = physicalId;
+                m_pad_six_axis[pad].quality[sensorIndex].reset();
+                m_pad_six_axis[pad].quality[sensorIndex].beginCalibration();
+                Logger::info("SIXAXIS: new physical Joy-Con sensor pad={} side={}; collecting stationary bias",
+                             pad, side);
+            }
+            observations.push_back({physicalId, pad, side});
         }
         if (!identificationComplete)
             break;

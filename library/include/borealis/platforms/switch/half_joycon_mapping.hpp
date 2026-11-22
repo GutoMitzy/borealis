@@ -14,8 +14,9 @@ enum class HalfJoyConSide
 
 enum class JoyConInputMode
 {
-    SEPARATE,
-    PAIRED
+    SEPARATE,    // left and right halves have dedicated paired-player seats
+    PAIRED,      // physically merged into full Nintendo controllers
+    INDIVIDUAL  // each half has one independent virtual player seat
 };
 enum class HalfJoyConButton
 {

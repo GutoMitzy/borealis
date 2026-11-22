@@ -74,6 +74,7 @@ class SwitchInputManager : public InputManager
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     int getPreferredRightJoyConController();
     int getPreferredGyroMouseController();
+    bool isHandheldInputActive();
     void requestSixAxisManualCalibration();
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;

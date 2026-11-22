@@ -18,6 +18,7 @@
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/platforms/switch/switch_input.hpp>
+#include <borealis/platforms/switch/hybrid_controller_slots.hpp>
 #include <borealis/platforms/switch/motion_trace_csv.hpp>
 #include <borealis/platforms/switch/motion_sample_timing.hpp>
 #include <borealis/platforms/switch/system_button_owner.hpp>
@@ -427,17 +428,9 @@ bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
 
 int SwitchInputManager::getConnectedFullControllerCount()
 {
-    int count = 0;
-    for (int i = 0; i < GAMEPADS_MAX; ++i)
-    {
-        padUpdate(&padsState[i]);
-        const u32 style = padsState[i].style_set;
-        if (style && !(style & (HidNpadStyleTag_NpadJoyLeft |
-                               HidNpadStyleTag_NpadJoyRight |
-                               HidNpadStyleTag_NpadJoyDual)))
-            ++count;
-    }
-    return count;
+    // handleControllers() already called getControllersConnectedCount(), which
+    // refreshes the HID topology. Avoid re-reading every Npad each frame.
+    return cachedFullControllerCount;
 }
 
 bool SwitchInputManager::isHandheldInputActive()
@@ -592,6 +585,13 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
         }
     }
 
+    if (anyJoyCon)
+        hadJoyConInput = true;
+    cachedFullControllerCount = 0;
+    for (const auto& item : padPresence)
+        if (item.present && !item.left && !item.right)
+            ++cachedFullControllerCount;
+
     // Fix the order once the first physical controller is seen. If a Pro
     // Controller starts the session it remains the first virtual controller;
     // if Joy-Cons start it, their four seats stay first and a later Pro
@@ -614,10 +614,12 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     auto fallback = stableJoyConSlots(padPresence,
         joyConInputMode == JoyConInputMode::PAIRED,
         joyConInputMode != JoyConInputMode::PAIRED);
-    if (joyConInputMode == JoyConInputMode::PAIRED || !anyJoyCon)
+    if (joyConInputMode == JoyConInputMode::PAIRED ||
+        (!anyJoyCon && !hadJoyConInput))
     {
-        // The unchanged upstream FullKey/Pro Controller pathway continues
-        // to return only real controllers: no phantom Joy-Con seats.
+        // A Pro-only stream uses the unmodified FullKey pathway and only
+        // announces the real devices. Reserve Joy-Con seats only after an
+        // actual Joy-Con has appeared in this process.
         cachedLogicalSlots = std::move(fallback);
         return cachedLogicalSlots;
     }
@@ -629,6 +631,17 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
         if (padPresence[i].present && !padPresence[i].left &&
             !padPresence[i].right)
             fullControllers.push_back({i, 0});
+
+    if (!anyJoyCon)
+    {
+        // A previously connected Joy-Con has been detached. Do not compact
+        // the surviving Pro Controller or lose the reserved Joy-Con seats.
+        const auto emptyJoyConSeats = stablePhysicalJoyConSeats.resolve({});
+        cachedLogicalSlots = arrangeHybridControllerSlots(
+            fullControllers, emptyJoyConSeats,
+            fullControllerFirst, GAMEPADS_MAX);
+        return cachedLogicalSlots;
+    }
 
     // A single JoyDual may expose both individual Joy-Cons. Use hidsys type
     // to associate each ID with the correct half, never array position.
@@ -702,18 +715,8 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
 
     const auto before = stablePhysicalJoyConSeats.knownIds();
     auto joyConSeats = stablePhysicalJoyConSeats.resolve(observations);
-    cachedLogicalSlots.clear();
-    cachedLogicalSlots.reserve(fullControllers.size() + joyConSeats.size());
-    if (fullControllerFirst)
-        cachedLogicalSlots.insert(cachedLogicalSlots.end(),
-                                  fullControllers.begin(), fullControllers.end());
-    cachedLogicalSlots.insert(cachedLogicalSlots.end(),
-                              joyConSeats.begin(), joyConSeats.end());
-    if (!fullControllerFirst)
-        cachedLogicalSlots.insert(cachedLogicalSlots.end(),
-                                  fullControllers.begin(), fullControllers.end());
-    if (cachedLogicalSlots.size() > GAMEPADS_MAX)
-        cachedLogicalSlots.resize(GAMEPADS_MAX);
+    cachedLogicalSlots = arrangeHybridControllerSlots(
+        fullControllers, joyConSeats, fullControllerFirst, GAMEPADS_MAX);
     const auto after = stablePhysicalJoyConSeats.knownIds();
     if (before != after)
     {

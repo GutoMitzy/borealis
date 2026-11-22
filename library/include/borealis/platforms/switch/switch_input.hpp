@@ -80,6 +80,10 @@ class SwitchInputManager : public InputManager
     void requestSixAxisManualCalibration();
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;
+    HalfJoyConSide getLogicalJoyConSide(int controller) const;
+    bool forgetJoyConSeat(int seat);
+    void forgetAllJoyConSeats();
+    bool assignLastActiveJoyConToSeat(int seat);
 #ifdef __SWITCH2__
     void setJoyConMouseCursorSpeed(float speed) { this->mouse.setCursorSpeed(speed); }
     void setMouseScrollSensitivity(float sensitivity)

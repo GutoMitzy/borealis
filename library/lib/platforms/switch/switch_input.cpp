@@ -201,6 +201,7 @@ SwitchInputManager::SwitchInputManager()
         clearVibration(i);
     }
 
+    loadStableJoyConSeats();
     setJoyConInputMode(joyConInputMode);
 
     const Result mouseResult = this->mouse.initialize();
@@ -450,9 +451,67 @@ int SwitchInputManager::getPreferredRightJoyConController()
     return -1;
 }
 
+namespace
+{
+struct JoyConSeatStorage
+{
+    std::uint64_t magic = 0x534541544a435631ULL; // SEATJCV1
+    std::array<std::uint64_t, 4> ids = {};
+};
+constexpr const char* joyConSeatFile =
+    "sdmc:/switch/Moonlight-Switch/joycon_seats.bin";
+
+std::uint64_t stableJoyConHardwareId(HidsysUniquePadId id)
+{
+    HidsysUniquePadSerialNumber serial = {};
+    if (R_SUCCEEDED(hidsysGetUniquePadSerialNumber(id, &serial)))
+    {
+        bool nonzero = false;
+        std::uint64_t hash = 14695981039346656037ULL;
+        for (unsigned char b : serial.serial_number)
+        {
+            nonzero |= b != 0;
+            hash = (hash ^ b) * 1099511628211ULL;
+        }
+        if (nonzero)
+            return (hash & ~(1ULL << 63)) | (1ULL << 63);
+    }
+    // UniquePadId is stable while connected but not guaranteed across boots.
+    // This fallback is deliberately not persisted as a permanent identity.
+    return (id.id & ~(1ULL << 63)) ? (id.id & ~(1ULL << 63)) : 1;
+}
+}
+
+void SwitchInputManager::loadStableJoyConSeats()
+{
+    FILE* file = fopen(joyConSeatFile, "rb");
+    if (!file)
+        return;
+    JoyConSeatStorage data = {};
+    const bool valid = fread(&data, sizeof(data), 1, file) == 1
+        && data.magic == JoyConSeatStorage{}.magic;
+    fclose(file);
+    if (valid)
+        stablePhysicalJoyConSeats.restore(data.ids);
+}
+
+void SwitchInputManager::persistStableJoyConSeats()
+{
+    JoyConSeatStorage data = {};
+    data.ids = stablePhysicalJoyConSeats.knownIds();
+    FILE* file = fopen(joyConSeatFile, "wb");
+    if (!file)
+        return;
+    fwrite(&data, sizeof(data), 1, file);
+    fclose(file);
+}
+
 std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
 {
     std::array<StableJoyConPad, GAMEPADS_MAX> padPresence = {};
+    std::array<std::uint64_t, GAMEPADS_MAX> topology = {};
+    bool anyJoyCon = false;
+    bool otherController = false;
     for (int i = 0; i < GAMEPADS_MAX; ++i)
     {
         padUpdate(&padsState[i]);
@@ -465,19 +524,103 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
             const u32 mask = joyDualConnectedSideMask(i, padGetAttributes(&padsState[i]));
             if (mask == 0)
                 continue;
-            padPresence[i] = { true, true, (mask & 1U) != 0, (mask & 2U) != 0 };
+            padPresence[i] = {true, true, (mask & 1U) != 0, (mask & 2U) != 0};
+            topology[i] = (static_cast<std::uint64_t>(style) << 32) | mask;
+            anyJoyCon = true;
         }
         else
         {
-            const HalfJoyConSide physicalSide = halfJoyConSide(style);
-            padPresence[i] = { true, false,
-                physicalSide == HalfJoyConSide::LEFT,
-                physicalSide == HalfJoyConSide::RIGHT };
+            const HalfJoyConSide side = halfJoyConSide(style);
+            padPresence[i] = {true, false,
+                side == HalfJoyConSide::LEFT, side == HalfJoyConSide::RIGHT};
+            topology[i] = static_cast<std::uint64_t>(style) << 32;
+            if (side == HalfJoyConSide::NONE)
+                otherController = true;
+            else
+                anyJoyCon = true;
         }
     }
-    return stableJoyConSlots(padPresence,
+
+    const auto now = std::chrono::steady_clock::now();
+    if (logicalSlotsCached && topology == cachedNpadTopology &&
+        now - lastPhysicalIdentityRefresh < std::chrono::milliseconds(500))
+        return cachedLogicalSlots;
+
+    cachedNpadTopology = topology;
+    lastPhysicalIdentityRefresh = now;
+    logicalSlotsCached = true;
+    auto fallback = stableJoyConSlots(padPresence,
         joyConInputMode == JoyConInputMode::PAIRED,
         joyConInputMode == JoyConInputMode::SEPARATE);
+    if (joyConInputMode != JoyConInputMode::SEPARATE ||
+        !anyJoyCon || otherController)
+    {
+        cachedLogicalSlots = std::move(fallback);
+        return cachedLogicalSlots;
+    }
+
+    // A single JoyDual may expose both individual Joy-Cons. Use hidsys type
+    // to associate each ID with the correct half, never array position.
+    std::vector<StableJoyConIdentityObservation> observations;
+    bool identificationComplete = true;
+    for (int pad = 0; pad < GAMEPADS_MAX; ++pad)
+    {
+        if (!padPresence[pad].present)
+            continue;
+        HidsysUniquePadId physical[2] = {};
+        s32 count = 0;
+        const Result rc = hidsysGetUniquePadsFromNpad(
+            static_cast<HidNpadIdType>(pad), physical, 2, &count);
+        if (R_FAILED(rc) || count < 1 || count > 2)
+        {
+            identificationComplete = false;
+            break;
+        }
+        for (int j = 0; j < count; ++j)
+        {
+            HidsysUniquePadType type = HidsysUniquePadType_Embedded;
+            if (R_FAILED(hidsysGetUniquePadType(physical[j], &type)))
+            {
+                identificationComplete = false;
+                break;
+            }
+            const int side = type == HidsysUniquePadType_LeftController ? 1
+                : type == HidsysUniquePadType_RightController ? 2 : 0;
+            if (!side)
+                continue;
+            if ((side == 1 && !padPresence[pad].left) ||
+                (side == 2 && !padPresence[pad].right))
+                continue;
+            observations.push_back({stableJoyConHardwareId(physical[j]), pad, side});
+        }
+        if (!identificationComplete)
+            break;
+    }
+
+    if (!identificationComplete || observations.empty())
+    {
+        // Never silently renumber a known Joy-Con because an hidsys request
+        // temporarily failed. Keep the last good layout until retry.
+        if (!cachedLogicalSlots.empty())
+            return cachedLogicalSlots;
+        cachedLogicalSlots = std::move(fallback);
+        return cachedLogicalSlots;
+    }
+
+    const auto before = stablePhysicalJoyConSeats.knownIds();
+    cachedLogicalSlots = stablePhysicalJoyConSeats.resolve(observations);
+    const auto after = stablePhysicalJoyConSeats.knownIds();
+    if (before != after)
+    {
+        bool persistentChanged = false;
+        for (int i = 0; i < 4; ++i)
+            if (before[i] != after[i] && (after[i] & (1ULL << 63)))
+                persistentChanged = true;
+        if (persistentChanged)
+            persistStableJoyConSeats();
+        Logger::info("JOYCON_SEATS: physical identities updated; stable P1/P2 assignments retained");
+    }
+    return cachedLogicalSlots;
 }
 
 short SwitchInputManager::getControllersConnectedCount()

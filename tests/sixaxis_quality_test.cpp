@@ -100,6 +100,31 @@ int main()
         }
     }
 
+    // A newly attached Joy-Con should not transmit stationary uncalibrated
+    // angular drift into an emulator's orientation integrator.
+    brls::SixAxisQuality reconnect;
+    reconnect.beginCalibration();
+    const float freshBias[3] = {0.036f, -0.022f, 0.014f};
+    for (std::uint64_t sample = 1; sample <= 39; ++sample)
+    {
+        assert(reconnect.process(gravity, freshBias, sample, true, corrected));
+        for (float value : corrected)
+            assert(value == 0.0f);
+    }
+    assert(reconnect.calibrationRequested);
+    assert(reconnect.process(gravity, freshBias, 40, true, corrected));
+    assert(!reconnect.calibrationRequested);
+    for (int axis = 0; axis < 3; ++axis)
+        assert(std::fabs(reconnect.bias[axis] - freshBias[axis]) < 1e-5f);
+
+    // An intentional movement should pass through immediately, even when
+    // the automatic startup calibration has not finished.
+    brls::SixAxisQuality earlyMotion;
+    earlyMotion.beginCalibration();
+    assert(earlyMotion.process(gravity, motion, 1, false, corrected));
+    assert(std::fabs(corrected[0] - motion[0]) < 1e-5f);
+    assert(earlyMotion.calibrationRequested);
+
     right.reset();
     assert(right.bias[0] == 0.0f);
     assert(!right.calibrationRequested);

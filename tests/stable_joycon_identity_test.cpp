@@ -1,50 +1,75 @@
 #include <borealis/platforms/switch/stable_joycon_identity.hpp>
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <vector>
 
 int main()
 {
-    using brls::StableJoyConIdentityObservation;
-    using brls::StableJoyConIdentitySlots;
-    using brls::StableJoyConSlot;
-    StableJoyConIdentitySlots identity;
-    auto seats = identity.resolve({
-        {1001, 0, 1}, {1002, 1, 2},
-        {2001, 2, 1}, {2002, 3, 2}
-    });
-    assert(seats.size() == 4);
-    assert((seats[0] == StableJoyConSlot{0, 1}));
-    assert((seats[1] == StableJoyConSlot{1, 2}));
-    assert((seats[2] == StableJoyConSlot{2, 1}));
-    assert((seats[3] == StableJoyConSlot{3, 2}));
+    using namespace brls;
+    const std::array<StableJoyConIdentityObservation, 4> physical = {{
+        {1001, 0, 1}, {1002, 1, 2}, {2001, 2, 1}, {2002, 3, 2}
+    }};
 
-    // Connecting the second pair first, changing HID index order, and later
-    // reconnecting the first pair must never exchange player seats.
-    seats = identity.resolve({
-        {2002, 0, 2}, {2001, 1, 1},
-        {1002, 2, 2}, {1001, 3, 1}
-    });
-    assert((seats[0] == StableJoyConSlot{3, 1}));
-    assert((seats[1] == StableJoyConSlot{2, 2}));
-    assert((seats[2] == StableJoyConSlot{1, 1}));
-    assert((seats[3] == StableJoyConSlot{0, 2}));
+    // With an established mapping, all 24 possible discovery orders must
+    // produce the same virtual player seats.
+    std::array<int, 4> permutation = {0, 1, 2, 3};
+    int runs = 0;
+    do {
+        StableJoyConIdentitySlots slots;
+        assert(slots.assignToSeat(1001, 1, 0));
+        assert(slots.assignToSeat(1002, 2, 1));
+        assert(slots.assignToSeat(2001, 1, 2));
+        assert(slots.assignToSeat(2002, 2, 3));
+        std::vector<StableJoyConIdentityObservation> input;
+        for (int index : permutation)
+            input.push_back(physical[index]);
+        const auto resolved = slots.resolve(input);
+        for (int i = 0; i < 4; ++i)
+            assert(resolved[i].padIndex == i &&
+                   resolved[i].side == physical[i].side);
+        ++runs;
+    } while (std::next_permutation(permutation.begin(), permutation.end()));
+    assert(runs == 24);
 
-    seats = identity.resolve({{2001, 1, 1}, {2002, 0, 2}});
-    assert(seats[0].padIndex == -1 && seats[1].padIndex == -1);
-    assert(seats[2].padIndex == 1 && seats[3].padIndex == 0);
-    seats = identity.resolve({{1001, 7, 1}, {1002, 6, 2}});
-    assert(seats[0].padIndex == 7 && seats[1].padIndex == 6);
-    assert(seats[2].padIndex == -1 && seats[3].padIndex == -1);
+    StableJoyConIdentitySlots slots;
+    slots.resolve({{1001, 0, 1}, {1002, 1, 2},
+                   {2001, 2, 1}, {2002, 3, 2}});
+    const auto full = slots.knownIds();
+    auto unresolved = slots.resolve({{9999, 5, 1}, {1002, 6, 2}});
+    assert(slots.unassignedCount() == 1);
+    assert(slots.knownIds() == full);
+    assert(unresolved[0].padIndex == -1 && unresolved[1].padIndex == 6);
 
-    // Only serial-derived IDs can be restored across full application runs.
+    // Explicit forget is required before a new physical device takes a
+    // stale seat. Reconnect is stable even if the HID index changes.
+    assert(slots.forgetSeat(0));
+    unresolved = slots.resolve({{9999, 5, 1}});
+    assert(slots.unassignedCount() == 0 && unresolved[0].padIndex == 5);
+    unresolved = slots.resolve({{9999, 7, 1}, {2002, 1, 2}});
+    assert(unresolved[0].padIndex == 7 && unresolved[3].padIndex == 1);
+
+    // Two LEFT Joy-Cons represent P1 and P2 in Individual mode.
+    slots.setLayout(JoyConSeatLayout::INDIVIDUAL);
+    auto individual = slots.resolve({{1001, 6, 1}, {2001, 3, 1}});
+    assert(individual.size() == 4);
+    assert(individual[0].padIndex == 6);
+    assert(individual[1].padIndex == 3);
+    assert(individual[2].padIndex == -1);
+    assert(individual[3].padIndex == -1);
+    assert(slots.knownIds(JoyConSeatLayout::PAIRS)[0] == 9999);
+    assert(slots.knownIds(JoyConSeatLayout::INDIVIDUAL)[0] == 1001);
+    slots.forgetAll();
+    assert(slots.knownIds(JoyConSeatLayout::INDIVIDUAL)[0] == 0);
+    assert(slots.knownIds(JoyConSeatLayout::PAIRS)[0] == 9999);
+
+    // Nonpersistent HID IDs are not resurrected across application launches.
     constexpr std::uint64_t serial = (1ULL << 63) | 0x1234ULL;
-    identity.reset();
-    identity.restore({serial, 12ULL, 0ULL, 0ULL});
-    const auto saved = identity.knownIds();
-    assert(saved[0] == serial);
-    assert(saved[1] == 0);
-    seats = identity.resolve({{serial, 4, 1}, {55ULL, 3, 2}});
-    assert(seats[0].padIndex == 4);
-    assert(seats[1].padIndex == 3);
+    slots.restoreV2({serial, 17ULL, 0ULL, 0ULL},
+                    {serial + 1ULL, 18ULL, 0ULL, 0ULL});
+    assert(slots.knownIds(JoyConSeatLayout::PAIRS)[0] == serial);
+    assert(slots.knownIds(JoyConSeatLayout::PAIRS)[1] == 0);
+    assert(slots.knownIds(JoyConSeatLayout::INDIVIDUAL)[0] == serial + 1ULL);
+    assert(slots.knownIds(JoyConSeatLayout::INDIVIDUAL)[1] == 0);
 }

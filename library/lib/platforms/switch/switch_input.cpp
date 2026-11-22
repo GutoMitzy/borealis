@@ -455,13 +455,21 @@ int SwitchInputManager::getPreferredRightJoyConController()
 
 namespace
 {
-struct JoyConSeatStorage
+struct JoyConSeatStorageV1
 {
     std::uint64_t magic = 0x534541544a435631ULL; // SEATJCV1
     std::array<std::uint64_t, 4> ids = {};
 };
-constexpr const char* joyConSeatFile =
+struct JoyConSeatStorageV2
+{
+    std::uint64_t magic = 0x534541544a435632ULL; // SEATJCV2
+    std::array<std::uint64_t, 4> paired = {};
+    std::array<std::uint64_t, 4> individual = {};
+};
+constexpr const char* joyConSeatFileV1 =
     "sdmc:/switch/Moonlight-Switch/joycon_seats.bin";
+constexpr const char* joyConSeatFileV2 =
+    "sdmc:/switch/Moonlight-Switch/joycon_players.bin";
 
 std::uint64_t stableJoyConHardwareId(HidsysUniquePadId id)
 {
@@ -486,26 +494,52 @@ std::uint64_t stableJoyConHardwareId(HidsysUniquePadId id)
 
 void SwitchInputManager::loadStableJoyConSeats()
 {
-    FILE* file = fopen(joyConSeatFile, "rb");
-    if (!file)
-        return;
-    JoyConSeatStorage data = {};
-    const bool valid = fread(&data, sizeof(data), 1, file) == 1
-        && data.magic == JoyConSeatStorage{}.magic;
-    fclose(file);
-    if (valid)
-        stablePhysicalJoyConSeats.restore(data.ids);
+    if (FILE* file = fopen(joyConSeatFileV2, "rb"))
+    {
+        JoyConSeatStorageV2 data = {};
+        const bool valid = fread(&data, sizeof(data), 1, file) == 1
+            && data.magic == JoyConSeatStorageV2{}.magic;
+        fclose(file);
+        if (valid)
+        {
+            stablePhysicalJoyConSeats.restoreV2(data.paired, data.individual);
+            return;
+        }
+        Logger::warning("JOYCON_SEATS: v2 table invalid; trying v1");
+    }
+    // Legacy one-time migration preserves P1/P2 assignments in Pairs mode.
+    if (FILE* file = fopen(joyConSeatFileV1, "rb"))
+    {
+        JoyConSeatStorageV1 data = {};
+        const bool valid = fread(&data, sizeof(data), 1, file) == 1
+            && data.magic == JoyConSeatStorageV1{}.magic;
+        fclose(file);
+        if (valid)
+            stablePhysicalJoyConSeats.restore(data.ids);
+    }
 }
 
 void SwitchInputManager::persistStableJoyConSeats()
 {
-    JoyConSeatStorage data = {};
-    data.ids = stablePhysicalJoyConSeats.knownIds();
-    FILE* file = fopen(joyConSeatFile, "wb");
+    JoyConSeatStorageV2 data = {};
+    data.paired = stablePhysicalJoyConSeats.knownIds(JoyConSeatLayout::PAIRS);
+    data.individual = stablePhysicalJoyConSeats.knownIds(JoyConSeatLayout::INDIVIDUAL);
+    const std::string temporary = std::string(joyConSeatFileV2) + ".tmp";
+    FILE* file = fopen(temporary.c_str(), "wb");
     if (!file)
+    {
+        Logger::warning("JOYCON_SEATS: failed to open temporary v2 table");
         return;
-    fwrite(&data, sizeof(data), 1, file);
-    fclose(file);
+    }
+    const bool written = fwrite(&data, sizeof(data), 1, file) == 1;
+    const bool synced = fflush(file) == 0;
+    const bool closed = fclose(file) == 0;
+    if (!written || !synced || !closed ||
+        rename(temporary.c_str(), joyConSeatFileV2) != 0)
+    {
+        remove(temporary.c_str());
+        Logger::warning("JOYCON_SEATS: could not save v2 table");
+    }
 }
 
 std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
@@ -553,8 +587,8 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     logicalSlotsCached = true;
     auto fallback = stableJoyConSlots(padPresence,
         joyConInputMode == JoyConInputMode::PAIRED,
-        joyConInputMode == JoyConInputMode::SEPARATE);
-    if (joyConInputMode != JoyConInputMode::SEPARATE ||
+        joyConInputMode != JoyConInputMode::PAIRED);
+    if (joyConInputMode == JoyConInputMode::PAIRED ||
         !anyJoyCon || otherController)
     {
         cachedLogicalSlots = std::move(fallback);
@@ -637,8 +671,12 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
                 persistentChanged = true;
         if (persistentChanged)
             persistStableJoyConSeats();
-        Logger::info("JOYCON_SEATS: physical identities updated; stable P1/P2 assignments retained");
+        Logger::info("JOYCON_SEATS: physical identities updated, mode={}",
+                     static_cast<int>(joyConInputMode));
     }
+    if (stablePhysicalJoyConSeats.unassignedCount())
+        Logger::warning("JOYCON_SEATS: {} physical Joy-Cons do not have a free player seat",
+                        stablePhysicalJoyConSeats.unassignedCount());
     return cachedLogicalSlots;
 }
 
@@ -1624,7 +1662,7 @@ void SwitchInputManager::configureJoyConAssignmentMode(JoyConInputMode mode)
         const HidNpadIdType firstId = static_cast<HidNpadIdType>(first);
         const HidNpadIdType secondId = static_cast<HidNpadIdType>(first + 1);
 
-        if (mode == JoyConInputMode::SEPARATE)
+        if (mode != JoyConInputMode::PAIRED)
         {
             padUpdate(&padsState[first]);
             padUpdate(&padsState[first + 1]);
@@ -1687,6 +1725,11 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
         return;
 
     joyConInputMode = mode;
+    stablePhysicalJoyConSeats.setLayout(
+        mode == JoyConInputMode::INDIVIDUAL
+            ? JoyConSeatLayout::INDIVIDUAL : JoyConSeatLayout::PAIRS);
+    logicalSlotsCached = false;
+    cachedLogicalSlots.clear();
     const HidNpadJoyHoldType holdType = mode == JoyConInputMode::PAIRED
         ? HidNpadJoyHoldType_Vertical
         : HidNpadJoyHoldType_Horizontal;
@@ -1759,12 +1802,12 @@ void SwitchInputManager::refreshHalfJoyConClaims()
                 const bool leftConnected = (connectedSides & 1U) != 0;
                 const bool rightConnected = (connectedSides & 2U) != 0;
 
-                if (leftConnected && (!rightConnected || joyConInputMode == JoyConInputMode::SEPARATE))
+                if (leftConnected && (!rightConnected || joyConInputMode != JoyConInputMode::PAIRED))
                 {
                     candidates[0] |= 1ULL << i;
                     claims |= halfJoyConSystemClaims(halfMappings[0], HalfJoyConSide::LEFT);
                 }
-                if (rightConnected && (!leftConnected || joyConInputMode == JoyConInputMode::SEPARATE))
+                if (rightConnected && (!leftConnected || joyConInputMode != JoyConInputMode::PAIRED))
                 {
                     candidates[1] |= 1ULL << i;
                     candidates[2] |= 1ULL << i;

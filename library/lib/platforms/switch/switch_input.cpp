@@ -1083,7 +1083,8 @@ void SwitchInputManager::handleControllerSensors()
 
     auto fire = [&](int index, int padIndex, int sensorIndex,
                     const HidSixAxisSensorState& sixaxis,
-                    HalfJoyConSide side, bool atRest, SixAxisQuality& quality)
+                    HalfJoyConSide side, bool atRest, SixAxisQuality& quality,
+                    bool latestInBatch)
     {
         const float accel[3] = {
             -sixaxis.acceleration.x * 9.80665f,
@@ -1156,6 +1157,8 @@ void SwitchInputManager::handleControllerSensors()
         gyroState.atRest = atRest;
         accelState.sampleIntervalSeconds = motionSampleIntervalSeconds(sixaxis.delta_time);
         gyroState.sampleIntervalSeconds = accelState.sampleIntervalSeconds;
+        accelState.latestInBatch = latestInBatch;
+        gyroState.latestInBatch = latestInBatch;
         for (int k = 0; k < 3; ++k)
         {
             accelState.data[k] = remappedAccel[k];
@@ -1186,7 +1189,8 @@ void SwitchInputManager::handleControllerSensors()
             forEachOldestMotionSample(sixaxis, samples,
                 [&](const HidSixAxisSensorState& sample) {
                     fire(controllerIndex, -1, 0, sample, HalfJoyConSide::NONE,
-                         R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality);
+                         R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality,
+                         &sample == &sixaxis[0]);
                 });
         }
         else if (debugTick)
@@ -1238,7 +1242,8 @@ void SwitchInputManager::handleControllerSensors()
                 [&](const HidSixAxisSensorState& sample) {
                     fire(controllerIndex, padIndex, sensor, sample, side,
                          R_SUCCEEDED(restResult) && atRest,
-                         m_pad_six_axis[padIndex].quality[sensor]);
+                         m_pad_six_axis[padIndex].quality[sensor],
+                         &sample == &sixaxis[0]);
                 });
         }
     }

@@ -215,6 +215,8 @@ class SwitchInputManager : public InputManager
     bool logicalSlotsCached = false;
     bool fullControllerOrderInitialized = false;
     bool fullControllerFirst = false;
+    bool hadJoyConInput = false;
+    int cachedFullControllerCount = 0;
     void loadStableJoyConSeats();
     void persistStableJoyConSeats();
     std::vector<StableJoyConSlot> collectStableJoyConSlots();

@@ -425,6 +425,21 @@ bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
     return true;
 }
 
+int SwitchInputManager::getConnectedFullControllerCount()
+{
+    int count = 0;
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
+    {
+        padUpdate(&padsState[i]);
+        const u32 style = padsState[i].style_set;
+        if (style && !(style & (HidNpadStyleTag_NpadJoyLeft |
+                               HidNpadStyleTag_NpadJoyRight |
+                               HidNpadStyleTag_NpadJoyDual)))
+            ++count;
+    }
+    return count;
+}
+
 bool SwitchInputManager::isHandheldInputActive()
 {
     padUpdate(&padStateHandheld);
@@ -577,6 +592,17 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
         }
     }
 
+    // Fix the order once the first physical controller is seen. If a Pro
+    // Controller starts the session it remains the first virtual controller;
+    // if Joy-Cons start it, their four seats stay first and a later Pro
+    // Controller joins after them. Do not let HID enumeration move the Pro
+    // Controller across saved SDL input profiles.
+    if (!fullControllerOrderInitialized && (otherController || anyJoyCon))
+    {
+        fullControllerFirst = otherController;
+        fullControllerOrderInitialized = true;
+    }
+
     const auto now = std::chrono::steady_clock::now();
     if (logicalSlotsCached && topology == cachedNpadTopology &&
         now - lastPhysicalIdentityRefresh < std::chrono::milliseconds(500))
@@ -588,12 +614,21 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     auto fallback = stableJoyConSlots(padPresence,
         joyConInputMode == JoyConInputMode::PAIRED,
         joyConInputMode != JoyConInputMode::PAIRED);
-    if (joyConInputMode == JoyConInputMode::PAIRED ||
-        !anyJoyCon || otherController)
+    if (joyConInputMode == JoyConInputMode::PAIRED || !anyJoyCon)
     {
+        // The unchanged upstream FullKey/Pro Controller pathway continues
+        // to return only real controllers: no phantom Joy-Con seats.
         cachedLogicalSlots = std::move(fallback);
         return cachedLogicalSlots;
     }
+
+    // Full-size pads retain their original button/axis/rumble/sensor path.
+    // They are not part of the Joy-Con serial identity table.
+    std::vector<StableJoyConSlot> fullControllers;
+    for (int i = 0; i < GAMEPADS_MAX; ++i)
+        if (padPresence[i].present && !padPresence[i].left &&
+            !padPresence[i].right)
+            fullControllers.push_back({i, 0});
 
     // A single JoyDual may expose both individual Joy-Cons. Use hidsys type
     // to associate each ID with the correct half, never array position.
@@ -606,6 +641,11 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
             sensorPhysicalIds[pad] = {};
             continue;
         }
+        // Pro Controller and other FullKey input must never be required
+        // to implement the Joy-Con-specific hidsys serial API.
+        if (!padPresence[pad].left && !padPresence[pad].right)
+            continue;
+
         HidsysUniquePadId physical[2] = {};
         s32 count = 0;
         const Result rc = hidsysGetUniquePadsFromNpad(
@@ -661,7 +701,19 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     }
 
     const auto before = stablePhysicalJoyConSeats.knownIds();
-    cachedLogicalSlots = stablePhysicalJoyConSeats.resolve(observations);
+    auto joyConSeats = stablePhysicalJoyConSeats.resolve(observations);
+    cachedLogicalSlots.clear();
+    cachedLogicalSlots.reserve(fullControllers.size() + joyConSeats.size());
+    if (fullControllerFirst)
+        cachedLogicalSlots.insert(cachedLogicalSlots.end(),
+                                  fullControllers.begin(), fullControllers.end());
+    cachedLogicalSlots.insert(cachedLogicalSlots.end(),
+                              joyConSeats.begin(), joyConSeats.end());
+    if (!fullControllerFirst)
+        cachedLogicalSlots.insert(cachedLogicalSlots.end(),
+                                  fullControllers.begin(), fullControllers.end());
+    if (cachedLogicalSlots.size() > GAMEPADS_MAX)
+        cachedLogicalSlots.resize(GAMEPADS_MAX);
     const auto after = stablePhysicalJoyConSeats.knownIds();
     if (before != after)
     {

@@ -78,6 +78,7 @@ class SwitchInputManager : public InputManager
     int getPreferredGyroMouseController();
     bool isHandheldInputActive();
     int getConnectedFullControllerCount();
+    void resetStreamingControllerOrder();
     void requestSixAxisManualCalibration();
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;

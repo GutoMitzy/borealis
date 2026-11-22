@@ -422,6 +422,12 @@ bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
     return true;
 }
 
+bool SwitchInputManager::isHandheldInputActive()
+{
+    padUpdate(&padStateHandheld);
+    return padStateHandheld.active_handheld;
+}
+
 int SwitchInputManager::getPreferredGyroMouseController()
 {
     padUpdate(&padStateHandheld);

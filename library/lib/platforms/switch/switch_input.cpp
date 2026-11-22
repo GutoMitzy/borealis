@@ -1846,6 +1846,94 @@ void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)
     }
 }
 
+bool SwitchInputManager::isJoyConGyroMouseShortcutPressed(int controller, int shortcut)
+{
+    if (shortcut < 0 || shortcut >= 5)
+        return false;
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side) ||
+        padIndex < 0 || side == HalfJoyConSide::NONE)
+        return false;
+
+    padUpdate(pad);
+    const bool left = side == HalfJoyConSide::LEFT;
+    const std::uint64_t sideMask = left
+        ? (HidNpadButton_L | HidNpadButton_ZL | HidNpadButton_LeftSL |
+           HidNpadButton_LeftSR | HidNpadButton_StickL)
+        : (HidNpadButton_R | HidNpadButton_ZR | HidNpadButton_RightSL |
+           HidNpadButton_RightSR | HidNpadButton_StickR);
+
+    std::uint64_t buttons = padGetButtons(pad) & sideMask;
+    if (pad->style_set & HidNpadStyleTag_NpadJoyDual)
+    {
+        // Nintendo can report shoulder/SL/SR on the side-specific HID stream
+        // even when they are absent from the merged JoyDual button snapshot.
+        buttons |= readJoyConSideButtonFallback(padIndex, side);
+    }
+
+    const std::uint64_t sl = left ? HidNpadButton_LeftSL : HidNpadButton_RightSL;
+    const std::uint64_t sr = left ? HidNpadButton_LeftSR : HidNpadButton_RightSR;
+    const std::uint64_t shoulder = left ? HidNpadButton_L : HidNpadButton_R;
+    const std::uint64_t trigger = left ? HidNpadButton_ZL : HidNpadButton_ZR;
+    const std::uint64_t stick = left ? HidNpadButton_StickL : HidNpadButton_StickR;
+
+    switch (shortcut)
+    {
+        case 0: return (buttons & (sl | sr)) == (sl | sr); // SL + SR
+        case 1: return (buttons & (shoulder | trigger)) == (shoulder | trigger);
+        case 2: return (buttons & stick) != 0;
+        case 3: return (buttons & sl) != 0;
+        case 4: return (buttons & sr) != 0;
+        default: return false;
+    }
+}
+
+std::uint64_t SwitchInputManager::getPhysicalJoyConId(int controller)
+{
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (!resolveController(controller, &pad, &padIndex, &side) ||
+        padIndex < 0 || side == HalfJoyConSide::NONE)
+        return 0;
+
+    HidsysUniquePadId ids[2] = {};
+    s32 count = 0;
+    if (R_FAILED(hidsysGetUniquePadsFromNpad(
+            static_cast<HidNpadIdType>(padIndex), ids, 2, &count)) ||
+        count < 1 || count > 2)
+        return 0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        HidsysUniquePadType physicalSide = HidsysUniquePadType_Embedded;
+        if (R_FAILED(hidsysGetUniquePadType(ids[i], &physicalSide)))
+            continue;
+        if ((side == HalfJoyConSide::LEFT &&
+             physicalSide == HidsysUniquePadType_LeftController) ||
+            (side == HalfJoyConSide::RIGHT &&
+             physicalSide == HidsysUniquePadType_RightController))
+            return stableJoyConHardwareId(ids[i]);
+    }
+    return 0;
+}
+
+int SwitchInputManager::findControllerForPhysicalJoyConId(std::uint64_t id)
+{
+    if (!id)
+        return -1;
+    const auto slots = collectStableJoyConSlots();
+    const int offset = isHandheldInputActive() ? 1 : 0;
+    for (int slot = 0; slot < static_cast<int>(slots.size()) &&
+                       slot + offset < GAMEPADS_MAX; ++slot)
+        if (slots[slot].padIndex >= 0 &&
+            getPhysicalJoyConId(slot + offset) == id)
+            return slot + offset;
+    return -1;
+}
+
 HalfJoyConSide SwitchInputManager::getLogicalJoyConSide(int controller) const
 {
     PadState* pad = nullptr;

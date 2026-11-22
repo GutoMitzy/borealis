@@ -426,6 +426,21 @@ bool SwitchInputManager::requestSixAxisCalibrationForController(int controller)
     return true;
 }
 
+void SwitchInputManager::resetStreamingControllerOrder()
+{
+    // Only clear the streaming topology, not the physical Joy-Con seat table
+    // or the calibrated sensor biases. The next session can start with a
+    // Pro Controller even when Joy-Cons were used in the prior session.
+    fullControllerOrderInitialized = false;
+    fullControllerFirst = false;
+    hadJoyConInput = false;
+    reservedFullControllerSeats = 0;
+    logicalSlotsCached = false;
+    cachedLogicalSlots.clear();
+    cachedNpadTopology = {};
+    lastPhysicalIdentityRefresh = {};
+}
+
 int SwitchInputManager::getConnectedFullControllerCount()
 {
     // handleControllers() already called getControllersConnectedCount(), which

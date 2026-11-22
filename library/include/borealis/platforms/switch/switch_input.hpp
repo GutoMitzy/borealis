@@ -77,6 +77,7 @@ class SwitchInputManager : public InputManager
     int getPreferredRightJoyConController();
     int getPreferredGyroMouseController();
     bool isHandheldInputActive();
+    int getConnectedFullControllerCount();
     void requestSixAxisManualCalibration();
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;
@@ -212,6 +213,8 @@ class SwitchInputManager : public InputManager
     std::array<std::array<std::uint64_t, 2>, GAMEPADS_MAX> sensorPhysicalIds = {};
     std::chrono::steady_clock::time_point lastPhysicalIdentityRefresh = {};
     bool logicalSlotsCached = false;
+    bool fullControllerOrderInitialized = false;
+    bool fullControllerFirst = false;
     void loadStableJoyConSeats();
     void persistStableJoyConSeats();
     std::vector<StableJoyConSlot> collectStableJoyConSlots();

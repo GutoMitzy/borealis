@@ -205,6 +205,7 @@ class SwitchInputManager : public InputManager
     StableJoyConIdentitySlots stablePhysicalJoyConSeats;
     std::vector<StableJoyConSlot> cachedLogicalSlots;
     std::array<std::uint64_t, GAMEPADS_MAX> cachedNpadTopology = {};
+    std::array<std::array<std::uint64_t, 2>, GAMEPADS_MAX> sensorPhysicalIds = {};
     std::chrono::steady_clock::time_point lastPhysicalIdentityRefresh = {};
     bool logicalSlotsCached = false;
     void loadStableJoyConSeats();

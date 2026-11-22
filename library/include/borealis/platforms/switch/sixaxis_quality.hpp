@@ -75,6 +75,12 @@ struct SixAxisQuality
             calibrationSamples = 0;
         }
 
+        // During an initial or manual stationary calibration, do not forward
+        // uncorrected angular drift to the host. Still accept movement if the
+        // controller stops reporting rest. The accelerometer remains live.
+        const bool suppressUncalibratedRestMotion =
+            calibrationRequested && atRest && angularSq < 0.04f;
+
         if (calibrationRequested)
         {
             if (atRest && angularSq < 0.04f)
@@ -126,7 +132,8 @@ struct SixAxisQuality
         }
 
         for (int i = 0; i < 3; ++i)
-            corrected[i] = gyro[i] - bias[i];
+            corrected[i] = suppressUncalibratedRestMotion
+                ? 0.0f : gyro[i] - bias[i];
 
         return true;
     }

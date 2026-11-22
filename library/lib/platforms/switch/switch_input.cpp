@@ -227,6 +227,8 @@ SwitchInputManager::SwitchInputManager()
     {
         Result handheldStartResult = hidStartSixAxisSensor(this->m_six_axis_sensor_handle_handheld);
         m_six_axis_sensor_handheld_active = R_SUCCEEDED(handheldStartResult);
+        if (m_six_axis_sensor_handheld_active)
+            m_handheld_sixaxis_quality.beginCalibration();
         if (R_FAILED(handheldStartResult))
             Logger::warning("SIXAXIS: handheld start failed rc=0x{:x}", handheldStartResult);
         else
@@ -1211,6 +1213,8 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
     }
 
     sixAxis.count = handleCount;
+    for (int i = 0; i < handleCount; ++i)
+        sixAxis.quality[i].beginCalibration();
     Logger::info("SIXAXIS: pad={} style=0x{:x} tag=0x{:x} handles={} acquired",
         pad, style, static_cast<unsigned>(tag), handleCount);
     sixAxisDebug("ACQUIRE pad=%d style=0x%x tag=0x%x handles=%d",

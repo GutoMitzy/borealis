@@ -611,10 +611,11 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     cachedNpadTopology = topology;
     lastPhysicalIdentityRefresh = now;
     logicalSlotsCached = true;
+    const bool nativeInput = joyConInputMode == JoyConInputMode::NATIVE;
     auto fallback = stableJoyConSlots(padPresence,
-        joyConInputMode == JoyConInputMode::PAIRED,
-        joyConInputMode != JoyConInputMode::PAIRED);
-    if (joyConInputMode == JoyConInputMode::PAIRED ||
+        joyConInputMode == JoyConInputMode::PAIRED || nativeInput,
+        joyConInputMode != JoyConInputMode::PAIRED && !nativeInput);
+    if (joyConInputMode == JoyConInputMode::PAIRED || nativeInput ||
         (!anyJoyCon && !hadJoyConInput))
     {
         // A Pro-only stream uses the unmodified FullKey pathway and only
@@ -1785,21 +1786,24 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
             ? JoyConSeatLayout::INDIVIDUAL : JoyConSeatLayout::PAIRS);
     logicalSlotsCached = false;
     cachedLogicalSlots.clear();
-    const HidNpadJoyHoldType holdType = mode == JoyConInputMode::PAIRED
-        ? HidNpadJoyHoldType_Vertical
-        : HidNpadJoyHoldType_Horizontal;
-    const Result result = hidSetNpadJoyHoldType(holdType);
-
-    if (R_FAILED(result))
-        Logger::warning("JOYCON_MODE: hold type update failed mode={} rc=0x{:x}",
-            static_cast<int>(mode), result);
-
+    if (mode != JoyConInputMode::NATIVE)
+    {
+        const HidNpadJoyHoldType holdType = mode == JoyConInputMode::PAIRED
+            ? HidNpadJoyHoldType_Vertical : HidNpadJoyHoldType_Horizontal;
+        const Result result = hidSetNpadJoyHoldType(holdType);
+        if (R_FAILED(result))
+            Logger::warning("JOYCON_MODE: hold type update failed mode={} rc=0x{:x}",
+                            static_cast<int>(mode), result);
 #ifndef __SWITCH2__
-    configureJoyConAssignmentMode(mode);
+        configureJoyConAssignmentMode(mode);
 #endif
+    }
+    // Native mode must not call hidSetNpadJoyAssignmentModeSingle/Dual or
+    // change the physical hold type: Pro Controller and FullKey pads follow
+    // the original Borealis input and rumble paths.
     joyConInputModeInitialized = true;
-    Logger::info("JOYCON_MODE: mode={} holdType={}",
-        static_cast<int>(mode), static_cast<int>(holdType));
+    Logger::info("JOYCON_MODE: mode={} (native={}): preserving FullKey compatibility",
+                 static_cast<int>(mode), mode == JoyConInputMode::NATIVE);
     refreshHalfJoyConClaims();
 }
 

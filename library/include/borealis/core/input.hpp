@@ -246,6 +246,7 @@ struct SensorEvent
     uint32_t timestamp;
     bool atRest = false;
     float sampleIntervalSeconds = 0.0f;
+    bool latestInBatch = true;
 };
 
 // Represents the state of the controller (a gamepad or a keyboard) in the current frame

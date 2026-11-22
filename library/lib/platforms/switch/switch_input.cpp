@@ -1765,6 +1765,108 @@ void SwitchInputManager::setHalfJoyConMappingEnabled(bool enabled)
     }
 }
 
+HalfJoyConSide SwitchInputManager::getLogicalJoyConSide(int controller) const
+{
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    if (const_cast<SwitchInputManager*>(this)->resolveController(
+            controller, &pad, &padIndex, &side))
+        return side;
+    return HalfJoyConSide::NONE;
+}
+
+bool SwitchInputManager::forgetJoyConSeat(int seat)
+{
+    if (joyConInputMode == JoyConInputMode::PAIRED ||
+        !stablePhysicalJoyConSeats.forgetSeat(seat))
+        return false;
+    persistStableJoyConSeats();
+    logicalSlotsCached = false;
+    lastPhysicalIdentityRefresh = {};
+    Logger::info("JOYCON_SEATS: released seat={} mode={}",
+                 seat, static_cast<int>(joyConInputMode));
+    return true;
+}
+
+void SwitchInputManager::forgetAllJoyConSeats()
+{
+    stablePhysicalJoyConSeats.forgetAll();
+    persistStableJoyConSeats();
+    logicalSlotsCached = false;
+    lastPhysicalIdentityRefresh = {};
+    Logger::info("JOYCON_SEATS: cleared assignments mode={}",
+                 static_cast<int>(joyConInputMode));
+}
+
+bool SwitchInputManager::assignLastActiveJoyConToSeat(int seat)
+{
+    if (seat < 0 || seat >= 4 ||
+        joyConInputMode == JoyConInputMode::PAIRED)
+        return false;
+    u32 lastActive = 0;
+    if (R_FAILED(hidsysGetLastActiveNpad(&lastActive)) ||
+        lastActive >= GAMEPADS_MAX)
+        return false;
+    padUpdate(&padsState[lastActive]);
+    const u64 buttons = padGetButtons(&padsState[lastActive]);
+    const bool fromLeft = (buttons &
+        (HidNpadButton_LeftSL | HidNpadButton_LeftSR |
+         HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right |
+         HidNpadButton_Up | HidNpadButton_L | HidNpadButton_ZL |
+         HidNpadButton_Minus | HidNpadButton_StickL)) != 0;
+    const bool fromRight = (buttons &
+        (HidNpadButton_RightSL | HidNpadButton_RightSR |
+         HidNpadButton_A | HidNpadButton_B | HidNpadButton_X |
+         HidNpadButton_Y | HidNpadButton_R | HidNpadButton_ZR |
+         HidNpadButton_Plus | HidNpadButton_StickR)) != 0;
+
+    HidsysUniquePadId ids[2] = {};
+    s32 count = 0;
+    if (R_FAILED(hidsysGetUniquePadsFromNpad(
+            static_cast<HidNpadIdType>(lastActive), ids, 2, &count)) ||
+        count < 1 || count > 2)
+        return false;
+    int selected = -1;
+    int selectedSide = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        HidsysUniquePadType type = HidsysUniquePadType_Embedded;
+        if (R_FAILED(hidsysGetUniquePadType(ids[i], &type)))
+            continue;
+        const int side = type == HidsysUniquePadType_LeftController ? 1 :
+            type == HidsysUniquePadType_RightController ? 2 : 0;
+        if (!side)
+            continue;
+        if (joyConInputMode == JoyConInputMode::SEPARATE &&
+            (seat % 2 + 1) != side)
+            continue;
+        if (count == 2 && ((side == 1 && !fromLeft) ||
+                           (side == 2 && !fromRight)))
+            continue;
+        if (selected != -1)
+        {
+            // When both sides are actively held, user must press one
+            // Joy-Con at a time; never guess the physical owner.
+            Logger::warning("JOYCON_SEATS: ambiguous JoyDual owner, release the other Joy-Con");
+            return false;
+        }
+        selected = i;
+        selectedSide = side;
+    }
+    if (selected < 0)
+        return false;
+    const auto physicalId = stableJoyConHardwareId(ids[selected]);
+    if (!stablePhysicalJoyConSeats.assignToSeat(physicalId, selectedSide, seat))
+        return false;
+    persistStableJoyConSeats();
+    logicalSlotsCached = false;
+    lastPhysicalIdentityRefresh = {};
+    Logger::info("JOYCON_SEATS: manually assigned pad={} side={} seat={}",
+                 lastActive, selectedSide, seat);
+    return true;
+}
+
 bool SwitchInputManager::isHalfJoyConMappingActive(int controller) const
 {
     if (!halfMappingEnabled || controller < 0 || controller >= GAMEPADS_MAX)

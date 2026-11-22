@@ -632,6 +632,13 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
         if (padPresence[i].present && !padPresence[i].left &&
             !padPresence[i].right)
             fullControllers.push_back({i, 0});
+    // Retain full-size virtual identities once Joy-Cons have shared a
+    // session with them. Otherwise a temporary Pro disconnect would cause
+    // the Joy-Con seats to shift down into its former SDL slot.
+    reservedFullControllerSeats = std::max(reservedFullControllerSeats,
+                                          fullControllers.size());
+    while (fullControllers.size() < reservedFullControllerSeats)
+        fullControllers.push_back({-1, 0});
 
     if (!anyJoyCon)
     {

@@ -83,6 +83,12 @@ class SwitchInputManager : public InputManager
     bool requestSixAxisCalibrationForController(int controller);
     bool isHalfJoyConMappingActive(int controller) const;
     HalfJoyConSide getLogicalJoyConSide(int controller) const;
+    // Shortcut actions use the physical side-specific HID state, never the
+    // remapped gamepad buttons (which may be identical for different sides).
+    bool isJoyConGyroMouseShortcutPressed(int controller, int shortcut);
+    std::uint64_t getPhysicalJoyConId(int controller);
+    int findControllerForPhysicalJoyConId(std::uint64_t id);
+
     bool forgetJoyConSeat(int seat);
     void forgetAllJoyConSeats();
     bool assignLastActiveJoyConToSeat(int seat);

@@ -1639,6 +1639,10 @@ void SwitchInputManager::applyHalfMapping(ControllerState* state, PadState* pad,
 
 void SwitchInputManager::processSystemButtonEvent(::Event* event, int button)
 {
+    // Clear even if the event cannot be mapped to a logical Joy-Con. An
+    // uncleared auto-reset-disabled system event repeatedly wakes this
+    // high-priority thread and can starve the streaming/rendering loop.
+    eventClear(event);
     std::atomic<ButtonOverrideMode>* mode = button == 0 ? &m_screenshotButtonMode : &m_homeButtonMode;
     std::atomic<bool>* held               = button == 0 ? &m_isScreenshotPressed : &m_isHomePressed;
 #ifdef __SWITCH2__
@@ -1673,6 +1677,19 @@ void SwitchInputManager::processSystemButtonEvent(::Event* event, int button)
                         break;
                     }
         }
+        // Wireless HOME can report no last-active Npad even though a right
+        // Joy-Con generated the system event. Fall back only for the HOME
+        // event with at least one eligible right Joy-Con, rather than losing
+        // the key completely. Multiple Joy-Cons still prefer a valid owner.
+        if (button == 1 && owner < 0 && candidates)
+        {
+            for (int i = 0; i < GAMEPADS_MAX; ++i)
+                if (candidates & (1ULL << i))
+                {
+                    owner = i;
+                    break;
+                }
+        }
         halfConsumed = halfMappingEnabled && owner >= 0 && owner < GAMEPADS_MAX
             && (halfSystemClaims[owner].load() & (1U << button));
         if (mode->load() != ButtonOverrideMode::NONE)
@@ -1680,7 +1697,6 @@ void SwitchInputManager::processSystemButtonEvent(::Event* event, int button)
     }
     if (!halfConsumed && mode->load() == ButtonOverrideMode::NONE)
         return;
-    eventClear(event);
     systemButtonOwners[button] = owner;
     halfSystemConsumed[button] = !wasPressed && halfConsumed;
     *held                      = !wasPressed;

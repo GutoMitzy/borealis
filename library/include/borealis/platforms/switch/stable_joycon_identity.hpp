@@ -25,6 +25,15 @@ public:
         ids = {};
     }
 
+    std::array<std::uint64_t, 4> knownIds() const { return ids; }
+
+    void restore(const std::array<std::uint64_t, 4>& saved)
+    {
+        // Only serial-based persistent IDs can be reused after app restart.
+        for (int i = 0; i < 4; ++i)
+            ids[i] = (saved[i] & (1ULL << 63)) ? saved[i] : 0;
+    }
+
     std::vector<StableJoyConSlot> resolve(
         const std::vector<StableJoyConIdentityObservation>& observations)
     {

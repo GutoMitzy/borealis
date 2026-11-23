@@ -437,6 +437,7 @@ void SwitchInputManager::resetStreamingControllerOrder()
     reservedFullControllerSeats = 0;
     logicalSlotsCached = false;
     cachedLogicalSlots.clear();
+    cachedJoyConSeats.clear();
     cachedNpadTopology = {};
     lastPhysicalIdentityRefresh = {};
 }
@@ -454,11 +455,31 @@ bool SwitchInputManager::isHandheldInputActive()
     return padStateHandheld.active_handheld;
 }
 
+bool SwitchInputManager::isFullKeyController(int controller)
+{
+    PadState* pad = nullptr;
+    int padIndex = -1;
+    HalfJoyConSide side = HalfJoyConSide::NONE;
+    return resolveController(controller, &pad, &padIndex, &side) &&
+        (padGetStyleSet(pad) & HidNpadStyleTag_NpadFullKey) != 0;
+}
+
+int SwitchInputManager::getFirstJoyConPairRightController()
+{
+    if (joyConInputMode != JoyConInputMode::SEPARATE)
+        return -1;
+    getControllersConnectedCount();
+    if (!hadJoyConInput)
+        return -1;
+    return 1 + (padStateHandheld.active_handheld ? 1 : 0) +
+        (fullControllerFirst ? static_cast<int>(reservedFullControllerSeats) : 0);
+}
+
 int SwitchInputManager::getPreferredGyroMouseController()
 {
     padUpdate(&padStateHandheld);
     if (padStateHandheld.active_handheld)
-        return 0;
+        return handheldControllerIndex(collectStableJoyConSlots());
     return getPreferredRightJoyConController();
 }
 
@@ -612,7 +633,7 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     // if Joy-Cons start it, their four seats stay first and a later Pro
     // Controller joins after them. Do not let HID enumeration move the Pro
     // Controller across saved SDL input profiles.
-    if (!fullControllerOrderInitialized && (otherController || anyJoyCon))
+    if (!fullControllerOrderInitialized && (otherController || anyJoyCon || padStateHandheld.active_handheld))
     {
         fullControllerFirst = otherController;
         fullControllerOrderInitialized = true;
@@ -659,9 +680,9 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
     {
         // A previously connected Joy-Con has been detached. Do not compact
         // the surviving Pro Controller or lose the reserved Joy-Con seats.
-        const auto emptyJoyConSeats = stablePhysicalJoyConSeats.resolve({});
+        cachedJoyConSeats = stablePhysicalJoyConSeats.resolve({});
         cachedLogicalSlots = arrangeHybridControllerSlots(
-            fullControllers, emptyJoyConSeats,
+            fullControllers, cachedJoyConSeats,
             fullControllerFirst, GAMEPADS_MAX);
         return cachedLogicalSlots;
     }
@@ -728,18 +749,34 @@ std::vector<StableJoyConSlot> SwitchInputManager::collectStableJoyConSlots()
 
     if (!identificationComplete || observations.empty())
     {
-        // Never silently renumber a known Joy-Con because an hidsys request
-        // temporarily failed. Keep the last good layout until retry.
-        if (!cachedLogicalSlots.empty())
-            return cachedLogicalSlots;
-        cachedLogicalSlots = std::move(fallback);
+        // Preserve Joy-Con indices while serial lookup is unavailable.
+        // Rebuild FullKey slots from current HID data regardless of hidsys.
+        if (cachedJoyConSeats.empty())
+        {
+            auto joyConPresence = padPresence;
+            for (auto& pad : joyConPresence)
+                if (!pad.left && !pad.right)
+                    pad = {};
+            cachedJoyConSeats = stableJoyConSlots(joyConPresence, false, true);
+            cachedJoyConSeats.resize(4, {-1, 0});
+        }
+        for (auto& seat : cachedJoyConSeats)
+        {
+            if (seat.padIndex < 0)
+                continue;
+            const auto& pad = padPresence[seat.padIndex];
+            if (!(seat.side == 1 ? pad.left : pad.right))
+                seat.padIndex = -1;
+        }
+        cachedLogicalSlots = arrangeHybridControllerSlots(
+            fullControllers, cachedJoyConSeats, fullControllerFirst, GAMEPADS_MAX);
         return cachedLogicalSlots;
     }
 
     const auto before = stablePhysicalJoyConSeats.knownIds();
-    auto joyConSeats = stablePhysicalJoyConSeats.resolve(observations);
+    cachedJoyConSeats = stablePhysicalJoyConSeats.resolve(observations);
     cachedLogicalSlots = arrangeHybridControllerSlots(
-        fullControllers, joyConSeats, fullControllerFirst, GAMEPADS_MAX);
+        fullControllers, cachedJoyConSeats, fullControllerFirst, GAMEPADS_MAX);
     const auto after = stablePhysicalJoyConSeats.knownIds();
     if (before != after)
     {
@@ -767,6 +804,22 @@ short SwitchInputManager::getControllersConnectedCount()
     return static_cast<short>(std::min(total, GAMEPADS_MAX));
 }
 
+int SwitchInputManager::handheldControllerIndex(const std::vector<StableJoyConSlot>& slots) const
+{
+    if (!padStateHandheld.active_handheld)
+        return -1;
+    if (!fullControllerFirst || slots.empty())
+        return 0;
+
+    // Games that read only the first virtual controller should receive the
+    // external Pro Controller when it led the session, even in handheld mode.
+    const int firstPad = slots.front().padIndex;
+    const bool firstIsFullKey = firstPad >= 0 &&
+        (padGetStyleSet(&padsState[firstPad]) & HidNpadStyleTag_NpadFullKey) != 0;
+    const bool firstIsReservedFullKey = firstPad < 0 && reservedFullControllerSeats > 0;
+    return firstIsFullKey || firstIsReservedFullKey ? 1 : 0;
+}
+
 bool SwitchInputManager::resolveController(
     int controller, PadState** pad, int* padIndex, HalfJoyConSide* side)
 {
@@ -774,19 +827,18 @@ bool SwitchInputManager::resolveController(
         return false;
 
     padUpdate(&padStateHandheld);
-    if (padStateHandheld.active_handheld)
-    {
-        if (controller == 0)
-        {
-            *pad = &padStateHandheld;
-            *padIndex = -1;
-            *side = HalfJoyConSide::NONE;
-            return true;
-        }
-        --controller;
-    }
-
     const auto logicalSlots = collectStableJoyConSlots();
+    const int handheldIndex = handheldControllerIndex(logicalSlots);
+    if (controller == handheldIndex)
+    {
+        *pad = &padStateHandheld;
+        *padIndex = -1;
+        *side = HalfJoyConSide::NONE;
+        return true;
+    }
+    if (handheldIndex >= 0 && controller > handheldIndex)
+        --controller;
+
     if (controller >= static_cast<int>(logicalSlots.size()))
         return false;
 
@@ -1357,8 +1409,6 @@ void SwitchInputManager::refreshPadSixAxis(int pad)
 void SwitchInputManager::handleControllerSensors()
 {
     padUpdate(&this->padStateHandheld);
-    const bool handheld = padStateHandheld.active_handheld;
-    int controllerIndex = 0;
     constexpr std::size_t maxSamplesPerPoll = 8;
     static unsigned debugFrame = 0;
     const bool debugTick       = (debugFrame++ % 60) == 0;
@@ -1461,39 +1511,39 @@ void SwitchInputManager::handleControllerSensors()
         getControllerSensorStateChanged()->fire(gyroState);
     };
 
-    if (handheld)
-    {
-        HidSixAxisSensorState sixaxis[maxSamplesPerPoll] = {};
-        const size_t samples = m_six_axis_sensor_handheld_active
-            ? hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld,
-                                        sixaxis, maxSamplesPerPoll)
-            : 0;
-        if (samples > 0)
-        {
-            bool atRest = false;
-            const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
-            forEachOldestMotionSample(sixaxis, samples,
-                [&](const HidSixAxisSensorState& sample) {
-                    fire(controllerIndex, -1, 0, sample, HalfJoyConSide::NONE,
-                         R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality,
-                         &sample == &sixaxis[0]);
-                });
-        }
-        else if (debugTick)
-            sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
-        controllerIndex++;
-    }
-
-    // Take one consistent HID-slot snapshot per sensor polling pass.
-    // Resolving every logical controller separately would rescan all
-    // physical pads several times, especially with four Joy-Cons.
+    // Use the same logical ordering as buttons and rumble.
     const auto logicalSlots = collectStableJoyConSlots();
+    const int handheldIndex = handheldControllerIndex(logicalSlots);
     const int connectedControllers = std::min(
-        static_cast<int>(logicalSlots.size()) + (handheld ? 1 : 0),
+        static_cast<int>(logicalSlots.size()) + (handheldIndex >= 0 ? 1 : 0),
         static_cast<int>(GAMEPADS_MAX));
-    for (; controllerIndex < connectedControllers; controllerIndex++)
+    for (int controllerIndex = 0; controllerIndex < connectedControllers; ++controllerIndex)
     {
-        const int slotIndex = controllerIndex - (handheld ? 1 : 0);
+        if (controllerIndex == handheldIndex)
+        {
+            HidSixAxisSensorState sixaxis[maxSamplesPerPoll] = {};
+            const size_t samples = m_six_axis_sensor_handheld_active
+                ? hidGetSixAxisSensorStates(this->m_six_axis_sensor_handle_handheld,
+                                            sixaxis, maxSamplesPerPoll)
+                : 0;
+            if (samples > 0)
+            {
+                bool atRest = false;
+                const Result restResult = hidIsSixAxisSensorAtRest(this->m_six_axis_sensor_handle_handheld, &atRest);
+                forEachOldestMotionSample(sixaxis, samples,
+                    [&](const HidSixAxisSensorState& sample) {
+                        fire(controllerIndex, -1, 0, sample, HalfJoyConSide::NONE,
+                             R_SUCCEEDED(restResult) && atRest, m_handheld_sixaxis_quality,
+                             &sample == &sixaxis[0]);
+                    });
+            }
+            else if (debugTick)
+                sixAxisDebug("DATA ctl=%d handheld=1 samples=0", controllerIndex);
+            continue;
+        }
+
+        const int slotIndex = controllerIndex -
+            (handheldIndex >= 0 && controllerIndex > handheldIndex ? 1 : 0);
         const auto& slot = logicalSlots[slotIndex];
         const int padIndex = slot.padIndex;
         if (padIndex < 0 || padIndex >= GAMEPADS_MAX)
@@ -1808,6 +1858,7 @@ void SwitchInputManager::setJoyConInputMode(JoyConInputMode mode)
             ? JoyConSeatLayout::INDIVIDUAL : JoyConSeatLayout::PAIRS);
     logicalSlotsCached = false;
     cachedLogicalSlots.clear();
+    cachedJoyConSeats.clear();
     if (mode != JoyConInputMode::NATIVE)
     {
         const HidNpadJoyHoldType holdType = mode == JoyConInputMode::PAIRED
@@ -1924,13 +1975,16 @@ int SwitchInputManager::findControllerForPhysicalJoyConId(std::uint64_t id)
 {
     if (!id)
         return -1;
+    padUpdate(&padStateHandheld);
     const auto slots = collectStableJoyConSlots();
-    const int offset = isHandheldInputActive() ? 1 : 0;
-    for (int slot = 0; slot < static_cast<int>(slots.size()) &&
-                       slot + offset < GAMEPADS_MAX; ++slot)
-        if (slots[slot].padIndex >= 0 &&
-            getPhysicalJoyConId(slot + offset) == id)
-            return slot + offset;
+    const int handheldIndex = handheldControllerIndex(slots);
+    for (int slot = 0; slot < static_cast<int>(slots.size()); ++slot)
+    {
+        const int controller = slot + (handheldIndex >= 0 && slot >= handheldIndex ? 1 : 0);
+        if (controller < GAMEPADS_MAX && slots[slot].padIndex >= 0 &&
+            getPhysicalJoyConId(controller) == id)
+            return controller;
+    }
     return -1;
 }
 

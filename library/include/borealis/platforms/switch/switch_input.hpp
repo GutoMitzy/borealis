@@ -76,6 +76,8 @@ class SwitchInputManager : public InputManager
     JoyConInputMode getJoyConInputMode() const { return joyConInputMode; }
     int getPreferredRightJoyConController();
     int getPreferredGyroMouseController();
+    int getFirstJoyConPairRightController();
+    bool isFullKeyController(int controller);
     bool isHandheldInputActive();
     int getConnectedFullControllerCount();
     void resetStreamingControllerOrder();
@@ -216,6 +218,7 @@ class SwitchInputManager : public InputManager
     void hidInitializeKeyboardMap();
     StableJoyConIdentitySlots stablePhysicalJoyConSeats;
     std::vector<StableJoyConSlot> cachedLogicalSlots;
+    std::vector<StableJoyConSlot> cachedJoyConSeats;
     std::array<std::uint64_t, GAMEPADS_MAX> cachedNpadTopology = {};
     std::array<std::array<std::uint64_t, 2>, GAMEPADS_MAX> sensorPhysicalIds = {};
     std::chrono::steady_clock::time_point lastPhysicalIdentityRefresh = {};
@@ -228,6 +231,7 @@ class SwitchInputManager : public InputManager
     void loadStableJoyConSeats();
     void persistStableJoyConSeats();
     std::vector<StableJoyConSlot> collectStableJoyConSlots();
+    int handheldControllerIndex(const std::vector<StableJoyConSlot>& slots) const;
     bool resolveController(int controller, PadState** pad, int* padIndex, HalfJoyConSide* side);
     void updateControllerStateInner(ControllerState* state, PadState* pad, HalfJoyConSide side = HalfJoyConSide::NONE, int padIndex = -1);
     void sendRumbleInternal(HidVibrationDeviceHandle vibration_device[2], HidVibrationValue vibration_values[2],

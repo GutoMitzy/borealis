@@ -21,7 +21,7 @@ Consulte o [projeto original](https://github.com/xfangfang/borealis) e a [wiki](
 A camada Switch de Borealis foi adaptada para necessidades específicas do Moonlight-Switch:
 
 - **Mapeamento de Joy-Cons:** enumeração lógica de metades esquerda e direita, inclusive dois pares conectados e determinados arranjos físicos identificados como `JoyDual`.
-- **Identidade dos controles:** tentativas de preservar slots lógicos ao longo de reconexões e mudanças na ordem dos dispositivos; a identidade no Sunshine e no emulador continua dependendo do host.
+- **Identidade dos controles:** os assentos de Joy-Con são reservados após detectar Joy-Cons destacados e permanecem estáveis durante a sessão. O Pro Controller segue a detecção FullKey mesmo se a leitura do identificador de um Joy-Con falhar. Quando lidera a sessão, ocupa a primeira porta, inclusive no portátil.
 - **Sensores SixAxis:** leitura do giroscópio e acelerômetro por controle, com validação de amostras e rejeição de sequências antigas ou repetidas.
 - **Calibração do viés angular:** calibração automática e manual por sensor com repouso HID, aceleração próxima de 1 g e amostras consecutivas. Uma lacuna reinicia a coleta. Uma calibração válida continua em uso durante a coleta manual, e o ajuste automático converge gradualmente, inclusive em eixos cujo viés anterior era zero.
 - **Eventos com tempo de amostragem:** o `SensorEvent` oferece estado de repouso e duração válida do intervalo HID.

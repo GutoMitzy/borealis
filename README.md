@@ -23,9 +23,9 @@ A camada Switch de Borealis foi adaptada para necessidades específicas do Moonl
 - **Mapeamento de Joy-Cons:** enumeração lógica de metades esquerda e direita, inclusive dois pares conectados e determinados arranjos físicos identificados como `JoyDual`.
 - **Identidade dos controles:** tentativas de preservar slots lógicos ao longo de reconexões e mudanças na ordem dos dispositivos; a identidade no Sunshine e no emulador continua dependendo do host.
 - **Sensores SixAxis:** leitura do giroscópio e acelerômetro por controle, com validação de amostras e rejeição de sequências antigas ou repetidas.
-- **Calibração do viés angular:** ajustes automáticos conservadores quando o HID informa repouso e solicitação de calibração manual direcionada ao controle.
+- **Calibração do viés angular:** calibração automática e manual por sensor com repouso HID, aceleração próxima de 1 g e amostras consecutivas. Uma lacuna reinicia a coleta. Uma calibração válida continua em uso durante a coleta manual, e o ajuste automático converge gradualmente, inclusive em eixos cujo viés anterior era zero.
 - **Eventos com tempo de amostragem:** o `SensorEvent` oferece estado de repouso e duração válida do intervalo HID.
-- **Recuperação de amostras em frames lentos:** na branch v18, até oito amostras SixAxis são capturadas por leitura e reproduzidas da mais antiga para a mais recente, para reduzir perda de movimento durante oscilações da renderização do dock.
+- **Recuperação de amostras em frames lentos:** até oito amostras SixAxis são capturadas por leitura e reproduzidas da mais antiga para a mais recente, para reduzir perda de movimento durante oscilações da renderização do dock.
 
 Essas mudanças **não criam por si só uma ponte DSU** e não redefinem a orientação interna do emulador. A biblioteca continua sendo uma infraestrutura de entrada e interface, não um substituto do Sunshine ou do Fritchii. O comportamento em consoles físicos precisa ser validado.
 
@@ -34,14 +34,14 @@ Essas mudanças **não criam por si só uma ponte DSU** e não redefinem a orien
 O método recomendado é utilizar o submódulo já fixado na versão do Moonlight, evitando incompatibilidade entre as estruturas `SensorEvent` do aplicativo e da biblioteca:
 
 ```bash
-git clone --recurse-submodules -b joycon-dock-motion-reliability-v18 https://github.com/GutoMitzy/Moonlight-Switch.git
+git clone --recurse-submodules -b joycon-fidelity-v20 https://github.com/GutoMitzy/Moonlight-Switch.git
 cd Moonlight-Switch
 git submodule update --init --recursive
 ```
 
-Depois compile o cliente conforme o [README do Moonlight-Switch](https://github.com/GutoMitzy/Moonlight-Switch/tree/joycon-dock-motion-reliability-v18#compila%C3%A7%C3%A3o).
+Depois compile o cliente conforme o [README do Moonlight-Switch](https://github.com/GutoMitzy/Moonlight-Switch/tree/joycon-fidelity-v20#compila%C3%A7%C3%A3o).
 
-**Não misture** um Moonlight-Switch desta branch com uma versão upstream do Borealis que não inclua o campo `sampleIntervalSeconds` e o método `getPreferredGyroMouseController()`.
+Use a revisão fixada no submódulo para manter compatibilidade com os eventos de movimento e as consultas de topologia dos Joy-Cons.
 
 ## Compilar e testar a biblioteca
 

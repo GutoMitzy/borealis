@@ -68,6 +68,8 @@ MODEL = r"""
 #include <tuple>
 #include <switch.h>
 #include <borealis/platforms/switch/switch_chat_button.hpp>
+#include <borealis/platforms/switch/system_button_owner.hpp>
+using brls::resolveWirelessHomeOwner;
 using NXEvent=Event;
 using namespace std::chrono_literals;
 namespace brls {
@@ -156,7 +158,7 @@ int main(){
     observe={};
     run(input,{2,2},3);
     int chatClears=0;for(auto h:cleared)if(h==171)++chatClears;
-    assert(chatClears==1); // Startup only: disabled interception leaves AM's events alone.
+    assert(chatClears==3); // Clear every wakeup, including unhandled events.
     chatResult=9;
     input.setHomeButtonOverrideMode(ButtonOverrideMode::GUIDE_BUTTON);
     trace.clear();
@@ -185,7 +187,7 @@ int main(){
     input.halfMappingEnabled=true;
     input.halfSystemClaims[0]=1;input.halfAnyClaims=1;
     input.halfSourceCandidates[0]=1;
-    input.setScreenshotButtonOverrideMode(ButtonOverrideMode::GUIDE_BUTTON);
+    input.setScreenshotButtonOverrideMode(ButtonOverrideMode::NONE);
     bool halfDown=false;
     observe=[&]{if(cursor==1){halfDown=input.m_isScreenshotPressed&&input.halfSystemConsumed[0];assert(!input.guide());assert(!input.isScreenshotButtonPressed());}};
 #ifdef __SWITCH2__
@@ -196,6 +198,7 @@ int main(){
     assert(halfDown);
     activePad=1;
     input.halfSourceCandidates[0]=3;
+    input.setScreenshotButtonOverrideMode(ButtonOverrideMode::GUIDE_BUTTON);
     bool menuDown=false;
     observe=[&]{if(cursor==1)menuDown=input.isScreenshotButtonPressed()&&input.guide();};
 #ifdef __SWITCH2__
@@ -207,6 +210,7 @@ int main(){
     // A stale last-active right half cannot own Capture. A unique physical
     // source is safe to infer, while multiple possible sources remain ambiguous.
     input.halfSourceCandidates[0]=1;
+    input.setScreenshotButtonOverrideMode(ButtonOverrideMode::NONE);
     halfDown=false;
     observe=[&]{if(cursor==1)halfDown=input.halfSystemConsumed[0]&&input.systemButtonOwners[0]==0;};
 #ifdef __SWITCH2__
@@ -218,8 +222,8 @@ int main(){
 #ifdef __SWITCH2__
     input.halfSystemClaims[0]=6;input.halfAnyClaims=6;
     input.halfSourceCandidates[1]=input.halfSourceCandidates[2]=1;
-    input.setChatButtonOverrideMode(ButtonOverrideMode::CUSTOM_EVENT);
-    input.setHomeButtonOverrideMode(ButtonOverrideMode::GUIDE_BUTTON);
+    input.setChatButtonOverrideMode(ButtonOverrideMode::NONE);
+    input.setHomeButtonOverrideMode(ButtonOverrideMode::NONE);
     bool homeDown=false,chatDown=false;
     observe=[&]{
         if(cursor==1)homeDown=input.halfSystemConsumed[1]&&!input.isHomeButtonPressed()&&!input.guide();
@@ -239,7 +243,7 @@ int main(){
     run(input,{0,0},2);
 #endif
     int captureClears=0;for(auto h:cleared)if(h==141)++captureClears;
-    assert(captureClears==1);
+    assert(captureClears==3);
 }
 """
 

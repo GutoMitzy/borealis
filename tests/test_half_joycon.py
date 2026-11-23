@@ -57,7 +57,7 @@ int main(){
     applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,0,true,false);
     assert(state.buttons[BUTTON_START]&&!state.buttons[BUTTON_BACK]);
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_Plus,true,false);
-    assert(state.buttons[BUTTON_START]&&state.buttons[BUTTON_BACK]);
+    assert(state.buttons[BUTTON_START]&&state.buttons[BUTTON_GUIDE]&&!state.buttons[BUTTON_BACK]);
     applyHalfJoyConMapping(&state,left,HalfJoyConSide::LEFT,HidNpadButton_L|HidNpadButton_ZL,false,false);
     assert(state.buttons[BUTTON_LB]&&state.buttons[BUTTON_LT]);
     applyHalfJoyConMapping(&state,right,HalfJoyConSide::RIGHT,HidNpadButton_R|HidNpadButton_ZR,false,false);

@@ -125,6 +125,29 @@ int main()
     assert(std::fabs(corrected[0] - motion[0]) < 1e-5f);
     assert(earlyMotion.calibrationRequested);
 
+    // A HID rest snapshot cannot qualify a burst with implausible gravity,
+    // nor can samples on opposite sides of a missing interval be combined.
+    brls::SixAxisQuality interrupted;
+    interrupted.beginCalibration();
+    const float shaking[3] = {0.0f, 0.0f, 14.0f};
+    for (std::uint64_t sample = 1; sample <= 40; ++sample)
+        assert(interrupted.process(shaking, freshBias, sample, true, corrected));
+    assert(interrupted.calibrationSamples == 0);
+    for (std::uint64_t sample = 41; sample <= 79; ++sample)
+        assert(interrupted.process(gravity, freshBias, sample, true, corrected));
+    assert(interrupted.calibrationSamples == 39);
+    assert(interrupted.process(gravity, freshBias, 81, true, corrected));
+    assert(interrupted.calibrationSamples == 1);
+
+    // A legitimately calibrated zero-bias axis still adapts gradually.
+    brls::SixAxisQuality zeroBias;
+    const float zero[3] = {};
+    for (std::uint64_t sample = 1; sample <= 40; ++sample)
+        assert(zeroBias.process(gravity, zero, sample, true, corrected));
+    for (std::uint64_t sample = 41; sample <= 80; ++sample)
+        assert(zeroBias.process(gravity, freshBias, sample, true, corrected));
+    assert(std::fabs(zeroBias.bias[0] - freshBias[0] * 0.02f) < 1e-6f);
+
     right.reset();
     assert(right.bias[0] == 0.0f);
     assert(!right.calibrationRequested);
